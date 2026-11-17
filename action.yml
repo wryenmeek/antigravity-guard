@@ -1,5 +1,5 @@
 name: 'Antigravity Guard Pre-Merge Action'
-description: 'Validates Antigravity session telemetry receipts, unresolved review threads, and optional skill/issue completion audits'
+description: 'Validates Antigravity session telemetry receipts, unresolved review threads, skill receipts, and issue audit ledgers'
 author: 'wryenmeek'
 
 inputs:
@@ -18,6 +18,14 @@ inputs:
     description: 'Optional owner/repo if checking across repositories'
     required: false
     default: ''
+  verify-issue-audits:
+    description: 'Enforce strict .infigraph/reviews/issue_<N>_audit.json verification'
+    required: false
+    default: 'false'
+  verify-skill-receipts:
+    description: 'Enforce .github/required-skills.json skill receipt verification'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -43,6 +51,8 @@ runs:
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_POST_STATUS: ${{ inputs.post-status }}
+        INPUT_VERIFY_ISSUE_AUDITS: ${{ inputs.verify-issue-audits }}
+        INPUT_VERIFY_SKILL_RECEIPTS: ${{ inputs.verify-skill-receipts }}
       run: |
         ARGS=(--pr "$INPUT_PR_NUMBER")
         if [ -n "$INPUT_REPO" ]; then
@@ -50,5 +60,11 @@ runs:
         fi
         if [ "$INPUT_POST_STATUS" = "true" ]; then
           ARGS+=(--post-status)
+        fi
+        if [ "$INPUT_VERIFY_ISSUE_AUDITS" = "true" ]; then
+          ARGS+=(--verify-issue-audits)
+        fi
+        if [ "$INPUT_VERIFY_SKILL_RECEIPTS" = "true" ]; then
+          ARGS+=(--verify-skill-receipts)
         fi
         antigravity-guard verify "${ARGS[@]}"

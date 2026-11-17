@@ -84,6 +84,45 @@ def test_cli_main_dispatch_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             cli.main()
         assert exc.value.code == 0
 
+    with (
+        patch.object(
+            cli,
+            "verify_pr_telemetry",
+            return_value=(True, "Telemetry OK", None, "abcdef12"),
+        ),
+        patch.object(cli, "verify_skills", return_value=(True, "Skills OK")) as m_sk,
+        patch.object(cli, "verify_issue_audits", return_value=(False, "Issue audit incomplete")) as m_is,
+    ):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["antigravity-guard", "verify", "--pr", "15", "--verify-issue-audits", "--verify-skill-receipts"],
+        )
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        m_sk.assert_called_once()
+        m_is.assert_called_once()
+
+    with patch.object(cli, "verify_skills", return_value=(True, "OK")):
+        monkeypatch.setattr("sys.argv", ["antigravity-guard", "verify-skills", "--cwd", str(tmp_path)])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+
+    with patch.object(cli, "verify_issue_audits", return_value=(False, "FAIL")):
+        monkeypatch.setattr(
+            "sys.argv", ["antigravity-guard", "verify-issue", "--cwd", str(tmp_path), "--mode", "strict"]
+        )
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+
+    with patch("sys.stdin", io.StringIO("{bad")), patch("sys.stdout", io.StringIO()):
+        monkeypatch.setattr("sys.argv", ["antigravity-guard", "hook-stop"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+
 
 def test_plugin_validate_and_sync_local_removes_legacy_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """sync_plugin_local installs plugin bundle, writes installed_version.json, and deletes legacy plugin."""
