@@ -749,6 +749,9 @@ def is_direct_push_to_main(cmd_line: str, current_branch: str = "") -> bool:
     """Detects if a git push command is attempting to push directly to main or master."""
     if not re.search(r'(?:^|[;&|]\s*)\bgit(?:\s+-[^\s]+)*\s+push\b', cmd_line):
         return False
+    # Tag pushes are not branch pushes to main
+    if re.search(r'(?:^|\s)(?:--tags|refs/tags/[^\s]+)(?:\s|$)', cmd_line):
+        return False
     # If deleting a branch, check if deleting main/master
     if "--delete" in cmd_line or " -d " in cmd_line:
         return bool(re.search(r'\b(main|master)\b', cmd_line))

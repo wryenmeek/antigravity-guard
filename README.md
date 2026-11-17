@@ -19,6 +19,7 @@ Modern foundation models like **Gemini 3.8 Flash** heavily utilize **session pro
 2. **True Ground-Truth Telemetry**: Extracts raw protobuf varint execution metadata directly from local Antigravity conversation databases (`~/.gemini/antigravity/conversations/*.db`), measuring uncached prompt, cached prompt hits, thinking tokens, and candidate output.
 3. **Automated PR Telemetry Comments**: Publishes comprehensive billing reports directly onto GitHub Pull Requests with embedded cryptographic receipts.
 4. **Pre-Merge Validation Gate**: Hard-blocks `gh pr merge` and `git merge` commands (both locally via lifecycle harness hooks and remotely via GitHub Actions) until 100% of committed agent sessions have verified token telemetry receipts.
+5. **Protected Branch Push Prohibition**: Intercepts and denies direct pushes to `main` or `master` (`git push origin main`), strictly enforcing feature-branch pull request workflows with automated telemetry auditing.
 
 ---
 
@@ -104,6 +105,7 @@ The plugin bundles operational agent rules in `plugin/rules/AGENTS.md`:
 - **Deterministic Commit Receipts**: Enforces `Antigravity-Session-ID: <uuid>` trailers on all commits.
 - **Explicit Repository Context**: Requires agents to supply `--repo <owner>/<repo>` with `gh pr merge` so GraphQL provenance resolution is deterministic.
 - **Worktree Merge Discipline**: Prevents merging directly from inside `.worktrees/` directories and triggers automated post-merge pruning.
+- **Protected Branch Push Prohibition**: Blocks direct pushes to `main` or `master` (`decision: deny`), requiring changes to flow through pull requests.
 
 ---
 
