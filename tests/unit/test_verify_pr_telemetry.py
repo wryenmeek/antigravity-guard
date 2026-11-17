@@ -4,25 +4,19 @@ tests/test_verify_pr_telemetry.py
 Unit tests for .github/scripts/verify-pr-telemetry.py edge cases, pagination, authentication, and error handling.
 """
 
-import sys
-import os
 import json
-import unittest
-from unittest.mock import patch, MagicMock
 import subprocess
+import unittest
+from unittest.mock import MagicMock, patch
 
 import antigravity_telemetry.cli as vpr
 
 
 class TestVerifyPrTelemetry(unittest.TestCase):
-
     def test_extract_session_ids_from_text(self):
         # Single session ID
         text1 = "feat: add feature\n\nAntigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-        self.assertEqual(
-            vpr.extract_session_ids_from_text(text1),
-            ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]
-        )
+        self.assertEqual(vpr.extract_session_ids_from_text(text1), ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"])
 
         # Multiple unique session IDs + duplicates + case insensitivity
         text2 = (
@@ -33,7 +27,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         )
         self.assertEqual(
             vpr.extract_session_ids_from_text(text2),
-            ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b", "11111111-2222-3333-4444-555555555555"]
+            ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b", "11111111-2222-3333-4444-555555555555"],
         )
 
         # No session IDs
@@ -44,7 +38,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     def test_no_antigravity_commits_passes(self, mock_comments, mock_commits):
         mock_commits.return_value = (
             [{"oid": "abc12345", "messageHeadline": "human commit", "messageBody": "no session trailer"}],
-            "abc12345678"
+            "abc12345678",
         )
         mock_comments.return_value = [{"body": "regular comment", "authorAssociation": "OWNER"}]
 
@@ -57,16 +51,18 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_pr_comments")
     def test_missing_telemetry_receipt_fails(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "abc12345",
-                "messageHeadline": "feat: ai change",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "abc12345",
+                    "messageHeadline": "feat: ai change",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         mock_comments.return_value = [
             {"body": "looks good to me", "authorAssociation": "CONTRIBUTOR"},
-            {"body": "test comment", "authorAssociation": "MEMBER"}
+            {"body": "test comment", "authorAssociation": "MEMBER"},
         ]
 
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
@@ -83,24 +79,24 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                 {
                     "oid": "11111111",
                     "messageHeadline": "commit 1",
-                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
                 },
                 {
                     "oid": "22222222",
                     "messageHeadline": "commit 2",
-                    "messageBody": "Antigravity-Session-ID: eeee4444-5555-6666-7777-888899990000"
-                }
+                    "messageBody": "Antigravity-Session-ID: eeee4444-5555-6666-7777-888899990000",
+                },
             ],
-            "abc12345678"
+            "abc12345678",
         )
         receipt_json = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{\n'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{\n"
             '  "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],\n'
             '  "total_billed_tokens": 10000,\n'
             '  "cache_hit_pct": 90.0\n'
-            '}\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "}\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
@@ -113,21 +109,23 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_pr_comments")
     def test_all_sessions_covered_passes(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "11111111",
-                "messageHeadline": "commit 1",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "11111111",
+                    "messageHeadline": "commit 1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         receipt_json = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{\n'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{\n"
             '  "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],\n'
             '  "total_billed_tokens": 18605309,\n'
             '  "cache_hit_pct": 83.3\n'
-            '}\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "}\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
@@ -135,27 +133,30 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertTrue(passed)
         self.assertIn("ANTIGRAVITY MERGE GUARD PASSED", msg)
         self.assertIn("18,605,309", msg)
+        assert receipt is not None
         self.assertEqual(receipt.get("total_billed_tokens"), 18605309)
 
     @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
     def test_untrusted_commenter_receipt_ignored(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "11111111",
-                "messageHeadline": "commit 1",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "11111111",
+                    "messageHeadline": "commit 1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         # Untrusted contributor posting forged receipt with zero billing
         forged_receipt = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{\n'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{\n"
             '  "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],\n'
             '  "total_billed_tokens": 0\n'
-            '}\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "}\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         mock_comments.return_value = [
             {"body": forged_receipt, "author": {"login": "attacker"}, "authorAssociation": "NONE"}
@@ -169,21 +170,23 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_pr_comments")
     def test_null_covered_session_ids_handled_safely(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "11111111",
-                "messageHeadline": "commit 1",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "11111111",
+                    "messageHeadline": "commit 1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         # Explicitly null covered_session_ids
         receipt_json = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{\n'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{\n"
             '  "covered_session_ids": null,\n'
             '  "total_billed_tokens": 0\n'
-            '}\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "}\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
@@ -196,30 +199,32 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_pr_comments")
     def test_malformed_json_receipt_skipped(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "11111111",
-                "messageHeadline": "commit 1",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "11111111",
+                    "messageHeadline": "commit 1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         valid_receipt = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{\n'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{\n"
             '  "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],\n'
             '  "total_billed_tokens": 5000\n'
-            '}\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "}\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         corrupted_receipt = (
-            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
-            '{ this is not valid json : [[[\n'
-            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+            "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n"
+            "{ this is not valid json : [[[\n"
+            "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         )
         # Old valid receipt followed by later corrupted receipt
         mock_comments.return_value = [
             {"body": valid_receipt, "authorAssociation": "OWNER"},
-            {"body": corrupted_receipt, "authorAssociation": "OWNER"}
+            {"body": corrupted_receipt, "authorAssociation": "OWNER"},
         ]
 
         # Skips corrupted receipt and uses earlier valid receipt
@@ -242,7 +247,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             state="success",
             description="Verified Antigravity session telemetry",
             repo="wryenmeek/pp-docker",
-            target_url="https://github.com/wryenmeek/pp-docker/actions/runs/123"
+            target_url="https://github.com/wryenmeek/pp-docker/actions/runs/123",
         )
         self.assertTrue(ok)
         mock_run.assert_called_once()
@@ -262,8 +267,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                         "headRefOid": "final_sha_123",
                         "commits": {
                             "pageInfo": {"hasNextPage": True, "endCursor": "cursor_1"},
-                            "nodes": [{"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}]
-                        }
+                            "nodes": [
+                                {"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}
+                            ],
+                        },
                     }
                 }
             }
@@ -275,8 +282,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                         "headRefOid": "final_sha_123",
                         "commits": {
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
-                            "nodes": [{"commit": {"oid": "commit2", "messageHeadline": "head2", "messageBody": "body2"}}]
-                        }
+                            "nodes": [
+                                {"commit": {"oid": "commit2", "messageHeadline": "head2", "messageBody": "body2"}}
+                            ],
+                        },
                     }
                 }
             }
@@ -300,8 +309,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                         "headRefOid": "final_sha_123",
                         "commits": {
                             "pageInfo": {"hasNextPage": True, "endCursor": "cursor_1"},
-                            "nodes": [{"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}]
-                        }
+                            "nodes": [
+                                {"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}
+                            ],
+                        },
                     }
                 }
             }
@@ -338,29 +349,25 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_unresolved_review_threads")
     def test_unresolved_review_threads_fails_guard(self, mock_threads, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "abc12345",
-                "messageHeadline": "feat: ai change",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "abc12345",
+                    "messageHeadline": "feat: ai change",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
-        receipt = {
-            "total_billed_tokens": 1000,
-            "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]
-        }
+        receipt = {"total_billed_tokens": 1000, "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]}
         mock_comments.return_value = [
-            {
-                "body": f"{vpr.RECEIPT_START} {json.dumps(receipt)} {vpr.RECEIPT_END}",
-                "authorAssociation": "OWNER"
-            }
+            {"body": f"{vpr.RECEIPT_START} {json.dumps(receipt)} {vpr.RECEIPT_END}", "authorAssociation": "OWNER"}
         ]
         mock_threads.return_value = [
             {
                 "id": "PRRT_test123",
                 "author": "reviewer1",
                 "url": "https://github.com/wryenmeek/pp-docker/pull/11#discussion_r123",
-                "body": "Please add tests for this function"
+                "body": "Please add tests for this function",
             }
         ]
 
@@ -381,22 +388,18 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_unresolved_review_threads")
     def test_resolved_review_threads_passes_guard(self, mock_threads, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "abc12345",
-                "messageHeadline": "feat: ai change",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "abc12345",
+                    "messageHeadline": "feat: ai change",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
-        receipt = {
-            "total_billed_tokens": 1000,
-            "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]
-        }
+        receipt = {"total_billed_tokens": 1000, "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]}
         mock_comments.return_value = [
-            {
-                "body": f"{vpr.RECEIPT_START} {json.dumps(receipt)} {vpr.RECEIPT_END}",
-                "authorAssociation": "OWNER"
-            }
+            {"body": f"{vpr.RECEIPT_START} {json.dumps(receipt)} {vpr.RECEIPT_END}", "authorAssociation": "OWNER"}
         ]
         mock_threads.return_value = []
 
@@ -416,14 +419,22 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                                 {
                                     "id": "PRRT_resolved",
                                     "isResolved": True,
-                                    "comments": {"nodes": [{"author": {"login": "user1"}, "body": "resolved comment", "url": "url1"}]}
+                                    "comments": {
+                                        "nodes": [
+                                            {"author": {"login": "user1"}, "body": "resolved comment", "url": "url1"}
+                                        ]
+                                    },
                                 },
                                 {
                                     "id": "PRRT_open",
                                     "isResolved": False,
-                                    "comments": {"nodes": [{"author": {"login": "user2"}, "body": "open feedback", "url": "url2"}]}
-                                }
-                            ]
+                                    "comments": {
+                                        "nodes": [
+                                            {"author": {"login": "user2"}, "body": "open feedback", "url": "url2"}
+                                        ]
+                                    },
+                                },
+                            ],
                         }
                     }
                 }
@@ -440,4 +451,3 @@ class TestVerifyPrTelemetry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

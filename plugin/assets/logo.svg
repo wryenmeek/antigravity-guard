@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Antigravity Guard">
+  <defs>
+    <linearGradient id="ag-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a73e8" />
+      <stop offset="100%" stop-color="#0d47a1" />
+    </linearGradient>
+  </defs>
+  <path fill="url(#ag-grad)" d="M64 8L18 28v32c0 29.6 19.6 56.4 46 64 26.4-7.6 46-34.4 46-64V28L64 8z" />
+  <path fill="#ffffff" d="M56.2 84.5L36.5 64.8l7.1-7.1 12.6 12.6 28.2-28.2 7.1 7.1-35.3 35.3z" />
+</svg>

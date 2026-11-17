@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Local pre-commit quality gate for antigravity-guard.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
+
+STAGED_PY=()
+while IFS= read -r file; do
+  [[ -n "${file}" && -f "${file}" ]] && STAGED_PY+=("${file}")
+done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+
+if [[ "${#STAGED_PY[@]}" -gt 0 ]]; then
+  echo "🐍 [pre-commit] Running py_compile on ${#STAGED_PY[@]} staged Python file(s)..."
+  uv run --locked python -m py_compile "${STAGED_PY[@]}"
+fi
+
+echo "✨ [pre-commit] Running Ruff lint, Ruff format, ty, actionlint, and pytest coverage..."
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked ty check
+uv run --locked actionlint
+uv run --locked pytest -q --cov=antigravity_guard --cov-fail-under=90

@@ -14,10 +14,19 @@ build/
 venv/
 ENV/
 
-# Testing
+# Testing & Coverage
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
+
+# Linters & Infigraph / Local CI
+.ruff_cache/
+.infigraph/
+.claude/
+ci-failure-digest.json
+act_output.log
+infigraph-report.json
 
 # macOS
 .DS_Store

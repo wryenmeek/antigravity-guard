@@ -1,0 +1,10 @@
+[security]
+max_critical = 0
+max_high = 0
+
+[complexity]
+threshold = 15
+max_violations = 0
+
+[dead_code]
+max_dead = 25

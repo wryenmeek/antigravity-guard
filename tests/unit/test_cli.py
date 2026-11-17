@@ -6,15 +6,14 @@ Comprehensive unit test suite for antigravity_telemetry.cli
 import io
 import json
 import os
-import unittest
-from unittest.mock import patch, MagicMock
 import subprocess
+import unittest
+from unittest.mock import MagicMock, patch
 
 import antigravity_telemetry.cli as cli
 
 
 class TestAntigravityTelemetryCli(unittest.TestCase):
-
     def test_extract_session_ids_from_text(self):
         text = (
             "feat: add feature\n\n"
@@ -23,10 +22,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
             "Antigravity-Session-ID: 11111111-2222-3333-4444-555555555555\n"
         )
         cids = cli.extract_session_ids_from_text(text)
-        self.assertEqual(cids, [
-            "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
-            "11111111-2222-3333-4444-555555555555"
-        ])
+        self.assertEqual(cids, ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b", "11111111-2222-3333-4444-555555555555"])
 
     def test_parse_varints(self):
         data = bytes([0x08, 0x96, 0x01])
@@ -42,7 +38,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
     def test_verify_no_commits_passes(self, mock_comments, mock_commits):
         mock_commits.return_value = (
             [{"oid": "abc12345", "messageHeadline": "feat: human", "messageBody": ""}],
-            "abc12345678"
+            "abc12345678",
         )
         mock_comments.return_value = [{"body": "some comment", "authorAssociation": "OWNER"}]
         passed, msg, receipt, head = cli.verify_pr_telemetry(42)
@@ -54,12 +50,14 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
     @patch.object(cli, "get_pr_comments")
     def test_verify_missing_receipt_fails(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{
-                "oid": "abc12345",
-                "messageHeadline": "feat: ai change",
-                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-            }],
-            "abc12345678"
+            [
+                {
+                    "oid": "abc12345",
+                    "messageHeadline": "feat: ai change",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "abc12345678",
         )
         mock_comments.return_value = []
         passed, msg, receipt, head = cli.verify_pr_telemetry(42)
@@ -72,15 +70,23 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
     def test_verify_incomplete_provenance_fails(self, mock_comments, mock_commits):
         mock_commits.return_value = (
             [
-                {"oid": "111", "messageHeadline": "c1", "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"},
-                {"oid": "222", "messageHeadline": "c2", "messageBody": "Antigravity-Session-ID: 00000000-0000-0000-0000-000000000000"},
+                {
+                    "oid": "111",
+                    "messageHeadline": "c1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                },
+                {
+                    "oid": "222",
+                    "messageHeadline": "c2",
+                    "messageBody": "Antigravity-Session-ID: 00000000-0000-0000-0000-000000000000",
+                },
             ],
-            "22222222"
+            "22222222",
         )
         receipt_obj = {
             "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],
             "total_billed_tokens": 10000,
-            "cache_hit_pct": 90.0
+            "cache_hit_pct": 90.0,
         }
         comment_body = f"<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n{json.dumps(receipt_obj)}\nANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         mock_comments.return_value = [{"body": comment_body, "authorAssociation": "OWNER"}]
@@ -95,14 +101,18 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
     def test_verify_complete_provenance_passes(self, mock_comments, mock_commits):
         mock_commits.return_value = (
             [
-                {"oid": "111", "messageHeadline": "c1", "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"},
+                {
+                    "oid": "111",
+                    "messageHeadline": "c1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                },
             ],
-            "11111111"
+            "11111111",
         )
         receipt_obj = {
             "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],
             "total_billed_tokens": 18608875,
-            "cache_hit_pct": 91.9
+            "cache_hit_pct": 91.9,
         }
         comment_body = f"<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n{json.dumps(receipt_obj)}\nANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
         mock_comments.return_value = [{"body": comment_body, "authorAssociation": "OWNER"}]
@@ -116,12 +126,20 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
     @patch.object(cli, "get_pr_comments")
     def test_untrusted_comment_ignored(self, mock_comments, mock_commits):
         mock_commits.return_value = (
-            [{"oid": "111", "messageHeadline": "c1", "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"}],
-            "11111111"
+            [
+                {
+                    "oid": "111",
+                    "messageHeadline": "c1",
+                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                }
+            ],
+            "11111111",
         )
         receipt_obj = {"covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"]}
         comment_body = f"<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n{json.dumps(receipt_obj)}\nANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
-        mock_comments.return_value = [{"body": comment_body, "authorAssociation": "NONE", "author": {"login": "random-user"}}]
+        mock_comments.return_value = [
+            {"body": comment_body, "authorAssociation": "NONE", "author": {"login": "random-user"}}
+        ]
 
         passed, msg, receipt, head = cli.verify_pr_telemetry(42)
         self.assertFalse(passed)
@@ -142,15 +160,17 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Invalid commit SHA", msg)
 
-    @patch("sys.stdin", io.StringIO(json.dumps({
-        "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
-        "toolCall": {
-            "name": "run_command",
-            "args": {
-                "CommandLine": "git " + "commit -m \"feat: initial\""
-            }
-        }
-    })))
+    @patch(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                    "toolCall": {"name": "run_command", "args": {"CommandLine": "git " + 'commit -m "feat: initial"'}},
+                }
+            )
+        ),
+    )
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_handle_pre_tool_hook_commit_injection(self, mock_stdout):
         cli.handle_pre_tool_hook()
@@ -159,15 +179,17 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         overwritten = output["overwrite"]["CommandLine"]
         self.assertIn("Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b", overwritten)
 
-    @patch("sys.stdin", io.StringIO(json.dumps({
-        "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
-        "toolCall": {
-            "name": "run_command",
-            "args": {
-                "CommandLine": "gh " + "pr " + "merge 15 --squash"
-            }
-        }
-    })))
+    @patch(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+                    "toolCall": {"name": "run_command", "args": {"CommandLine": "gh " + "pr " + "merge 15 --squash"}},
+                }
+            )
+        ),
+    )
     @patch.object(cli, "verify_pr_telemetry")
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_handle_pre_tool_hook_merge_blocking(self, mock_stdout, mock_verify):
@@ -208,15 +230,19 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         self.assertEqual(len(res["pruned_worktrees"]), 1)
         self.assertEqual(res["pruned_worktrees"][0]["branch"], "feat-merged")
 
-    @patch("sys.stdin", io.StringIO(json.dumps({
-        "toolCall": {
-            "name": "run_command",
-            "args": {
-                "CommandLine": "gh " + "pr " + "merge 10 --squash",
-                "Cwd": "/repo"
-            }
-        }
-    })))
+    @patch(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "toolCall": {
+                        "name": "run_command",
+                        "args": {"CommandLine": "gh " + "pr " + "merge 10 --squash", "Cwd": "/repo"},
+                    }
+                }
+            )
+        ),
+    )
     @patch.object(cli, "prune_merged_branches_and_worktrees")
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_handle_post_tool_hook_on_merge(self, mock_stdout, mock_prune):
@@ -256,12 +282,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         payload = {
             "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
             "cwd": "/repo/.worktrees/feature-wt",
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "gh pr merge 15 --squash"
-                }
-            }
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "gh pr merge 15 --squash"}},
         }
         with patch("sys.stdin", io.StringIO(json.dumps(payload))):
             cli.handle_pre_tool_hook()
@@ -280,9 +301,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         def side_effect(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             mock = MagicMock(returncode=0, stderr="")
-            if "--git-dir" in cmd_str:
-                mock.stdout = ".git\n"
-            elif "--git-common-dir" in cmd_str:
+            if "--git-dir" in cmd_str or "--git-common-dir" in cmd_str:
                 mock.stdout = ".git\n"
             elif "remote.origin.url" in cmd_str:
                 mock.stdout = "https://github.com/wryenmeek/discovered-repo.git\n"
@@ -294,12 +313,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         payload = {
             "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
             "cwd": "/Users/wryen/Documents/Gemini/discovered-repo",
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "gh pr merge 20 --merge"
-                }
-            }
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "gh pr merge 20 --merge"}},
         }
         with patch("sys.stdin", io.StringIO(json.dumps(payload))):
             cli.handle_pre_tool_hook()
@@ -314,12 +328,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         mock_prune.return_value = {"pruned_branches": [], "pruned_worktrees": []}
         payload = {
             "cwd": "/path/from/payload",
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "gh pr merge 10 --merge"
-                }
-            }
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "gh pr merge 10 --merge"}},
         }
         with patch("sys.stdin", io.StringIO(json.dumps(payload))):
             cli.handle_post_tool_hook()
@@ -348,12 +357,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         payload = {
             "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
             "cwd": "/repo",
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "git push origin main"
-                }
-            }
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "git push origin main"}},
         }
         with patch("sys.stdin", io.StringIO(json.dumps(payload))):
             cli.handle_pre_tool_hook()
@@ -367,12 +371,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         payload = {
             "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
             "cwd": "/repo",
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "git push -u origin feat/my-cool-feature"
-                }
-            }
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "git push -u origin feat/my-cool-feature"}},
         }
         with patch("sys.stdin", io.StringIO(json.dumps(payload))):
             cli.handle_pre_tool_hook()

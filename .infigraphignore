@@ -1,0 +1,7 @@
+tests/
+dist/
+build/
+.venv/
+.git/
+.ruff_cache/
+.pytest_cache/

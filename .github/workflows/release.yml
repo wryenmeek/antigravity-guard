@@ -1,0 +1,72 @@
+name: Release & Floating Tags
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: Validate, Build & Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv and set up Python 3.12
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          python-version: "3.12"
+          enable-cache: ${{ !env.ACT }}
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Verify tag matches package and plugin versions
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          TAG_VER="${TAG_NAME#v}"
+          PKG_VER="$(uv run --locked python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          PLG_VER="$(uv run --locked python -c 'import json; print(json.load(open("plugin/plugin.json"))["version"])')"
+          if [ "$TAG_VER" != "$PKG_VER" ] || [ "$TAG_VER" != "$PLG_VER" ]; then
+            echo "Version mismatch: tag=$TAG_VER pyproject=$PKG_VER plugin=$PLG_VER" >&2
+            exit 1
+          fi
+
+      - name: Run quality gates and test suite
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+          uv run --locked ty check
+          uv run --locked actionlint
+          uv run --locked antigravity-guard validate-plugin --strict
+          uv run --locked pytest -q --cov=antigravity_guard --cov-fail-under=90
+
+      - name: Build distribution artifacts
+        run: uv build --wheel --sdist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" dist/* --verify-tag --title "$TAG_NAME" --generate-notes
+
+      - name: Update floating major compatibility tags (v1 & v2)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa v1 -m "Update floating v1 compatibility tag to ${{ github.ref_name }}"
+          git tag -fa v2 -m "Update floating v2 compatibility tag to ${{ github.ref_name }}"
+          git push --force origin v1 v2

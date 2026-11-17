@@ -1,12 +1,12 @@
 {
-  "antigravity-telemetry-hook": {
+  "antigravity-guard-hook": {
     "PreToolUse": [
       {
         "matcher": "run_command",
         "hooks": [
           {
             "type": "command",
-            "command": "antigravity-telemetry hook-pre-tool",
+            "command": "antigravity-guard hook-pre-tool",
             "timeout": 30
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "antigravity-telemetry hook-post-tool",
+            "command": "antigravity-guard hook-post-tool",
             "timeout": 30
           }
         ]
