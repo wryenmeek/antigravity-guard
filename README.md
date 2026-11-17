@@ -100,6 +100,11 @@ mkdir -p ~/.gemini/config/plugins/
 cp -r plugin ~/.gemini/config/plugins/antigravity-telemetry-guard
 ```
 
+The plugin bundles operational agent rules in `plugin/rules/AGENTS.md`:
+- **Deterministic Commit Receipts**: Enforces `Antigravity-Session-ID: <uuid>` trailers on all commits.
+- **Explicit Repository Context**: Requires agents to supply `--repo <owner>/<repo>` with `gh pr merge` so GraphQL provenance resolution is deterministic.
+- **Worktree Merge Discipline**: Prevents merging directly from inside `.worktrees/` directories and triggers automated post-merge pruning.
+
 ---
 
 ## GitHub Actions CI Integration
@@ -167,6 +172,7 @@ antigravity-telemetry verify --pr <PR_NUMBER> [--post-status] [--ignore-unresolv
 ```
 
 Options:
+- `--repo owner/repo`: Explicit GitHub repository context (recommended for deterministic CI and agent execution without local git context dependency).
 - `--post-status`: Posts a GitHub commit status check directly to the PR's head commit (`success` or `failure`).
 - `--ignore-unresolved-comments`: Disables review conversation check (verifies telemetry receipts only).
 - `--timeout <sec>`: Subprocess and network execution timeout (default: 60s).
