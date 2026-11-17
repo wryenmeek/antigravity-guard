@@ -48,6 +48,12 @@ from antigravity_guard.cli import (
     handle_pre_tool_hook as handle_pre_tool_hook,
 )
 from antigravity_guard.cli import (
+    handle_stop_hook as handle_stop_hook,
+)
+from antigravity_guard.cli import (
+    handle_stop_hook_cli as handle_stop_hook_cli,
+)
+from antigravity_guard.cli import (
     is_direct_push_to_main as is_direct_push_to_main,
 )
 from antigravity_guard.cli import (
@@ -63,7 +69,13 @@ from antigravity_guard.cli import (
     prune_merged_branches_and_worktrees as prune_merged_branches_and_worktrees,
 )
 from antigravity_guard.cli import (
+    verify_issue_audits as verify_issue_audits,
+)
+from antigravity_guard.cli import (
     verify_pr_telemetry as verify_pr_telemetry,
+)
+from antigravity_guard.cli import (
+    verify_skills as verify_skills,
 )
 
 sys.modules[__name__] = importlib.import_module("antigravity_guard.cli")
