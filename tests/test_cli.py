@@ -326,6 +326,57 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
 
         mock_prune.assert_called_once_with("/path/from/payload", quiet=True)
 
+    def test_is_direct_push_to_main(self):
+        self.assertTrue(cli.is_direct_push_to_main("git push origin main"))
+        self.assertTrue(cli.is_direct_push_to_main("git push -u origin main"))
+        self.assertTrue(cli.is_direct_push_to_main("git push origin HEAD:main"))
+        self.assertTrue(cli.is_direct_push_to_main("git push --force origin main"))
+        self.assertTrue(cli.is_direct_push_to_main("git push origin master"))
+        self.assertTrue(cli.is_direct_push_to_main("git push", current_branch="main"))
+        self.assertTrue(cli.is_direct_push_to_main("git push origin", current_branch="master"))
+
+        self.assertFalse(cli.is_direct_push_to_main("git push origin feat/my-branch"))
+        self.assertFalse(cli.is_direct_push_to_main("git push -u origin fix/issue-1"))
+        self.assertFalse(cli.is_direct_push_to_main("git push origin --delete feat/temp"))
+        self.assertFalse(cli.is_direct_push_to_main("git push", current_branch="feat/my-branch"))
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_handle_pre_tool_hook_blocks_direct_push_to_main(self, mock_stdout):
+        payload = {
+            "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+            "cwd": "/repo",
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "git push origin main"
+                }
+            }
+        }
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cli.handle_pre_tool_hook()
+
+        output = json.loads(mock_stdout.getvalue())
+        self.assertEqual(output["decision"], "deny")
+        self.assertIn("ANTIGRAVITY DIRECT PUSH GUARD BLOCKED", output["reason"])
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_handle_pre_tool_hook_allows_feature_branch_push(self, mock_stdout):
+        payload = {
+            "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+            "cwd": "/repo",
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "git push -u origin feat/my-cool-feature"
+                }
+            }
+        }
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cli.handle_pre_tool_hook()
+
+        output = json.loads(mock_stdout.getvalue())
+        self.assertEqual(output["decision"], "allow")
+
 
 if __name__ == "__main__":
     unittest.main()
