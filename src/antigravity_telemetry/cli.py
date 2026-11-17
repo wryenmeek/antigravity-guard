@@ -745,11 +745,33 @@ Shared survey reconnaissance, lifecycle sentinels, orchestrators, and victory au
 
 # --- Harness Hook Handlers ---
 
+def is_direct_push_to_main(cmd_line: str, current_branch: str = "") -> bool:
+    """Detects if a git push command is attempting to push directly to main or master."""
+    if not re.search(r'(?:^|[;&|]\s*)\bgit(?:\s+-[^\s]+)*\s+push\b', cmd_line):
+        return False
+    # If deleting a branch, check if deleting main/master
+    if "--delete" in cmd_line or " -d " in cmd_line:
+        return bool(re.search(r'\b(main|master)\b', cmd_line))
+    # Check if target ref specifies main or master
+    if re.search(r'(?::|\s)(?:origin\s+)?(?:[^\s:]+:)?(main|master)(?:\s|$)', cmd_line):
+        return True
+    # If bare git push (or git push origin) without specifying branch, and checked out on main/master
+    tokens = cmd_line.strip().split()
+    if "push" in tokens:
+        idx = tokens.index("push")
+        rem_args = [t for t in tokens[idx+1:] if not t.startswith("-")]
+        if not rem_args or rem_args == ["origin"]:
+            if current_branch in {"main", "master"}:
+                return True
+    return False
+
+
 def handle_pre_tool_hook():
     """
     Antigravity PreToolUse hook handler on stdin/stdout.
     1. Intercepts 'git commit': automatically appends 'Antigravity-Session-ID: <cid>' trailer.
-    2. Intercepts 'gh pr merge' / 'git merge': executes verify_pr_telemetry; blocks tool if unverified.
+    2. Intercepts 'git push' to main/master: blocks direct pushes to protected branches.
+    3. Intercepts 'gh pr merge' / 'git merge': executes verify_pr_telemetry; blocks tool if unverified.
     """
     try:
         payload = json.load(sys.stdin)
@@ -786,6 +808,33 @@ def handle_pre_tool_hook():
                 "overwrite": {
                     "CommandLine": mutated_cmd
                 }
+            }))
+            return
+
+    # Check for direct push to main/master at command boundary
+    if name == "run_command" and re.search(r"(?:^|[;&|]\s*)\bgit(?:\s+-[^\s]+)*\s+push\b", cmd_line):
+        cwd = payload.get("cwd") or (payload.get("workspacePaths", [None])[0] if payload.get("workspacePaths") else None) or (args.get("Cwd") if isinstance(args, dict) else None)
+        current_branch = ""
+        if cwd and os.path.isdir(cwd):
+            try:
+                head_res = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, timeout=5)
+                if head_res.returncode == 0:
+                    current_branch = head_res.stdout.strip()
+            except Exception:
+                pass
+
+        if is_direct_push_to_main(cmd_line, current_branch):
+            sys.stdout.write(json.dumps({
+                "decision": "deny",
+                "reason": (
+                    "[ANTIGRAVITY DIRECT PUSH GUARD BLOCKED]\n"
+                    "Direct push to protected branch (main/master) is strictly prohibited.\n"
+                    "All code changes must be pushed to a feature branch, submitted as a pull request, "
+                    "and validated through the pre-merge telemetry receipts gate.\n\n"
+                    "Action Required: Create and push a feature branch "
+                    "(e.g., 'git checkout -b feat/your-feature && git push -u origin feat/your-feature'), "
+                    "then submit a pull request with 'gh pr create'."
+                )
             }))
             return
 
@@ -1087,7 +1136,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "version":
-        print("antigravity-telemetry-guard v1.2.1")
+        print("antigravity-telemetry-guard v1.3.0")
         sys.exit(0)
     elif args.command == "prune":
         prune_merged_branches_and_worktrees(args.cwd, quiet=args.quiet)

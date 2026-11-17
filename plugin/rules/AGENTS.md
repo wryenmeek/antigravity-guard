@@ -20,3 +20,8 @@
 - **Never merge from inside a worktree**: Merging via `gh pr merge --delete-branch` while the current working directory (`Cwd`) is inside a mounted `.worktrees/` directory causes Git deletion failures. The harness `PreToolUse` hook intercepts and denies `gh pr merge` if invoked from within `.worktrees/`. Always switch to the primary repository root and detach the worktree first.
 - **Automated Pruning**: Whenever `gh pr merge` or `git merge` completes, the Antigravity lifecycle harness hook (`PostToolUse`) automatically executes `antigravity-telemetry prune`.
 - Any local branch or linked `.worktrees/` directory whose remote tracking branch has been deleted/merged is automatically pruned, and leftover empty worktree folders are cleaned up.
+
+## 4. Protected Branch Push Prohibition
+
+- **Never push directly to `main` or `master`**: Direct pushes to `main` or `master` (e.g., `git push origin main`, `git push origin HEAD:main`) bypass pull request creation, peer review, and telemetry spend auditing. The harness `PreToolUse` hook intercepts and denies direct pushes to protected branches.
+- Always push to a dedicated feature branch and submit changes through a pull request via `gh pr create`.
