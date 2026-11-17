@@ -5,6 +5,7 @@ Comprehensive unit test suite for antigravity_telemetry.cli
 
 import io
 import json
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 import subprocess
@@ -223,6 +224,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         cli.handle_post_tool_hook()
         mock_prune.assert_called_once_with("/repo", quiet=True)
 
+    @patch.dict(os.environ, {"GITHUB_REPOSITORY": ""})
     @patch("subprocess.run")
     def test_get_repo_owner_and_name_from_git_remote(self, mock_run):
         # SSH remote
@@ -269,6 +271,7 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         self.assertIn("ANTIGRAVITY WORKTREE GUARD BLOCKED", output["reason"])
         self.assertIn("/repo/.worktrees/feature-wt", output["reason"])
 
+    @patch.dict(os.environ, {"GITHUB_REPOSITORY": ""})
     @patch("subprocess.run")
     @patch("os.path.isdir", return_value=True)
     @patch.object(cli, "verify_pr_telemetry")
