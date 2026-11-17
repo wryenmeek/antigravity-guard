@@ -571,12 +571,12 @@ def verify_pr_telemetry(
 
 # --- Telemetry Calculation & Comment Posting ---
 
-def generate_and_post_telemetry(pr_num: int, repo: Optional[str] = None) -> bool:
+def generate_and_post_telemetry(pr_num: int, repo: Optional[str] = None, timeout: int = DEFAULT_TIMEOUT_SEC, cwd: Optional[str] = None) -> bool:
     """
     Computes exact session token metrics for a PR and posts the report comment with embedded receipt.
     """
     print(f"Aggregating Antigravity session telemetry for PR #{pr_num}...")
-    commits = get_pr_commits(pr_num, repo)
+    commits = get_pr_commits(pr_num, repo, timeout=timeout)
     
     direct_session_ids = set()
     for c in commits:
@@ -734,7 +734,7 @@ Shared survey reconnaissance, lifecycle sentinels, orchestrators, and victory au
     if repo:
         comment_cmd.extend(["-R", repo])
 
-    res = subprocess.run(comment_cmd, capture_output=True, text=True)
+    res = subprocess.run(comment_cmd, capture_output=True, text=True, timeout=timeout)
     if res.returncode != 0:
         sys.stderr.write(f"Failed to post comment to PR #{pr_num}: {res.stderr.strip()}\n")
         return False
