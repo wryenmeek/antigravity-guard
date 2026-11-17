@@ -64,8 +64,8 @@ def _resolve_commit_msg_file(raw_path: str, base_dir: Path) -> Path | None:
 def _append_trailer_to_file(msg_file: Path, conv_id: str) -> tuple[bool, str]:
     """Appends Antigravity-Session-ID trailer to an approved in-repo commit message file."""
     try:
-        with msg_file.open("a", encoding="utf-8") as fh:
-            fh.write(f"\n\nAntigravity-Session-ID: {conv_id}\n")
+        existing = msg_file.read_text(encoding="utf-8") if msg_file.exists() else ""
+        msg_file.write_text(f"{existing}\n\nAntigravity-Session-ID: {conv_id}\n", encoding="utf-8")
         return True, ""
     except OSError as exc:
         return False, f"Failed updating commit message file {msg_file}: {exc}"
@@ -170,23 +170,22 @@ def _evaluate_pre_tool_payload(payload: dict[str, Any]) -> dict[str, Any]:
     tool_call = payload.get("toolCall") or {}
     if tool_call.get("name") != "run_command":
         return {"decision": "allow"}
-    args = tool_call.get("args") or {}
-    cmd_line = str(args.get("CommandLine", "")) if isinstance(args, dict) else ""
-    raw_cwd = _extract_payload_cwd(payload, args if isinstance(args, dict) else {})
+    raw_args = tool_call.get("args")
+    args = raw_args if isinstance(raw_args, dict) else {}
+    cmd_line = str(args.get("CommandLine", ""))
+    raw_cwd = _extract_payload_cwd(payload, args)
     conv_id = str(payload.get("conversationId", ""))
 
-    if _COMMIT_CMD_RE.search(cmd_line):
-        decision = _handle_commit_hook(cmd_line, conv_id, raw_cwd)
-        if decision is not None:
-            return decision
-    if _PUSH_CMD_RE.search(cmd_line):
-        decision = _handle_push_hook(cmd_line, raw_cwd)
-        if decision is not None:
-            return decision
-    if _MERGE_CMD_RE.search(cmd_line):
-        decision = _handle_merge_hook(cmd_line, raw_cwd)
-        if decision is not None:
-            return decision
+    checks = (
+        (_COMMIT_CMD_RE, lambda: _handle_commit_hook(cmd_line, conv_id, raw_cwd)),
+        (_PUSH_CMD_RE, lambda: _handle_push_hook(cmd_line, raw_cwd)),
+        (_MERGE_CMD_RE, lambda: _handle_merge_hook(cmd_line, raw_cwd)),
+    )
+    for pattern, handler in checks:
+        if pattern.search(cmd_line):
+            decision = handler()
+            if decision is not None:
+                return decision
     return {"decision": "allow"}
 
 

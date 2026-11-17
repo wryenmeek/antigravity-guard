@@ -1,4 +1,12 @@
 {
-  "name": "antigravity-telemetry-guard",
-  "description": "Enforces deterministic commit receipts, automated PR spend telemetry, and pre-merge validation gates via harness hooks"
+  "name": "antigravity-guard",
+  "displayName": "Antigravity Guard",
+  "version": "2.0.0",
+  "description": "Enforces deterministic commit receipts, skill execution provenance, adversarial issue audits, automated PR spend telemetry, and pre-merge validation gates via harness hooks",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Verify PR telemetry and issue completion receipts before merging",
+    "Post Antigravity session token spend telemetry report to the pull request",
+    "Validate staged skill receipts and adversarial issue audit ledgers"
+  ]
 }

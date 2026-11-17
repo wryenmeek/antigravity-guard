@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import sqlite3
 import subprocess
 from dataclasses import dataclass
@@ -57,7 +59,7 @@ def create_telemetry_db(
     f1_bytes = encode_length_delimited(4, f4_bytes) + encode_length_delimited(19, model.encode("utf-8"))
     top_bytes = encode_length_delimited(1, f1_bytes)
 
-    with sqlite3.connect(db_path) as conn:
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS gen_metadata (idx INTEGER, data BLOB)")
         conn.execute("INSERT INTO gen_metadata (idx, data) VALUES (?, ?)", (0, top_bytes))
         conn.commit()
@@ -74,6 +76,11 @@ class GitWorktreeFixture:
     branch_name: str
 
 
+def _clean_git_env() -> dict[str, str]:
+    """Strips outer git hook env vars (e.g. GIT_DIR) so temp git repos stay isolated."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _git(cwd: Path, *args: str) -> str:
     res = subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -81,6 +88,7 @@ def _git(cwd: Path, *args: str) -> str:
         text=True,
         check=True,
         timeout=15,
+        env=_clean_git_env(),
     )
     return res.stdout.strip()
 
@@ -88,11 +96,17 @@ def _git(cwd: Path, *args: str) -> str:
 @pytest.fixture
 def git_worktree_env(tmp_path: Path) -> GitWorktreeFixture:
     """Creates a real bare remote, local main checkout, merged feature branch, and linked worktree."""
+    git_env = _clean_git_env()
     origin_dir = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(origin_dir)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(origin_dir)],
+        check=True,
+        capture_output=True,
+        env=git_env,
+    )
 
     repo_dir = tmp_path / "repo"
-    subprocess.run(["git", "clone", str(origin_dir), str(repo_dir)], check=True, capture_output=True)
+    subprocess.run(["git", "clone", str(origin_dir), str(repo_dir)], check=True, capture_output=True, env=git_env)
     _git(repo_dir, "config", "user.name", "Test Agent")
     _git(repo_dir, "config", "user.email", "test@example.com")
     # Ensure local symbolic-ref origin/HEAD is defined

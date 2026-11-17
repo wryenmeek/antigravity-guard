@@ -1,206 +1,80 @@
-# Antigravity Telemetry Guard
+# Antigravity Guard
 
-[![CI](https://github.com/wryenmeek/antigravity-telemetry-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/wryenmeek/antigravity-telemetry-guard/actions/workflows/ci.yml)
+[![CI](https://github.com/wryenmeek/antigravity-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/wryenmeek/antigravity-guard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-> **Deterministic AI agent token spend telemetry, session prompt caching receipts, and pre-merge guards for Google Antigravity and Compound Engineering pipelines.**
+> **Deterministic AI agent commit receipts, prompt-cache telemetry reports, protected branch/worktree safety, and pre-merge validation guards for Google Antigravity.**
 
----
-
-## Overview
-
-When running autonomous AI coding agent fleets (such as Google Antigravity, Compound Engineering `lfg`, or multi-agent orchestrators), tracking accurate token consumption and costs is essential. 
-
-Modern foundation models like **Gemini 3.8 Flash** heavily utilize **session prompt context caching** (>90% cache hit rates on multi-turn conversations), providing up to a 75% discount on cached input tokens. Standard un-cached API metrics or static character counts drastically miscalculate actual spend.
-
-`antigravity-telemetry-guard` provides a complete, deterministic, zero-dependency closed loop:
-1. **Deterministic Commit Receipts**: Automatically injects `Antigravity-Session-ID: <uuid>` git trailers into all commits made by agents.
-2. **True Ground-Truth Telemetry**: Extracts raw protobuf varint execution metadata directly from local Antigravity conversation databases (`~/.gemini/antigravity/conversations/*.db`), measuring uncached prompt, cached prompt hits, thinking tokens, and candidate output.
-3. **Automated PR Telemetry Comments**: Publishes comprehensive billing reports directly onto GitHub Pull Requests with embedded cryptographic receipts.
-4. **Pre-Merge Validation Gate**: Hard-blocks `gh pr merge` and `git merge` commands (both locally via lifecycle harness hooks and remotely via GitHub Actions) until 100% of committed agent sessions have verified token telemetry receipts.
-5. **Protected Branch Push Prohibition**: Intercepts and denies direct pushes to `main` or `master` (`git push origin main`), strictly enforcing feature-branch pull request workflows with automated telemetry auditing.
+*(Formerly `antigravity-telemetry-guard`; `antigravity-telemetry` CLI and `@v1` GitHub Action aliases remain backwards-compatible.)*
 
 ---
 
-## Architecture
+## Key Capabilities
 
-```
-       [ Antigravity Agent Session ]
-                    │
-       (run_command: git commit)
-                    ▼
-     [ PreToolUse Harness Hook ] ───► Auto-injects trailer:
-                    │                  "Antigravity-Session-ID: <session-id>"
-                    ▼
-          [ Git Commit in Repo ]
-                    │
-                    ▼
-       (ce-commit-push-pr / lfg) ────► Pushes branch & opens PR
-                    │
-                    ▼
-   [ antigravity-telemetry post --pr <N> ]
-                    │
-     1. Queries git trailers for all session IDs in PR
-     2. Decodes protobuf varints directly from ~/.gemini/antigravity/conversations/*.db
-     3. Asserts 100% session provenance (all committed sessions accounted for)
-     4. Posts/updates PR telemetry comment with embedded cryptographic receipt:
-        <!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START ... END -->
-                    │
-     ┌──────────────┴──────────────┐
-     ▼                             ▼
-[ Local PreToolUse Hook ]     [ Remote GitHub Actions CI ]
-(intercepts gh/git merge)     (action.yml)
-     │                             │
-     ▼                             ▼
-   [ antigravity-telemetry verify --pr <N> --post-status ]
-     │
-     ├─► Passes: Exits 0, commit status green, merge proceeds
-     └─► Fails / Missing: Exits 1, hard-blocks merge with remediation prompt
-```
+1. **Deterministic Commit Receipts**: Injects `Antigravity-Session-ID: <uuid>` trailers via `PreToolUse`, resolving `-F <commit-msg-file>` safely inside the validated `repo_root`.
+2. **Ground-Truth SQLite Telemetry**: Reads protobuf varint turn records from `~/.gemini/antigravity/conversations/*.db` factoring Antigravity's 75% cached prompt discount ($\text{Uncached} + 0.25 \times \text{Cached} + \text{Output}$).
+3. **Fail-Closed Pre-Merge & Push Guards**: Blocks direct pushes to `main`/`master`, blocks merges from inside `.worktrees/`, and verifies 100% session provenance + resolved review threads via GraphQL pagination.
+4. **Automated Plugin Validation & Sync**: `antigravity-guard validate-plugin --strict` and `antigravity-guard sync-plugin --clean-legacy`.
 
 ---
 
-## Features
+## Installation & Local Sync
 
-- **Zero External Dependencies**: Built strictly using Python's standard library (`sqlite3`, `json`, `subprocess`, `argparse`).
-- **Prompt Cache Accounting**: Correctly factors Gemini tiered caching discounts (`Uncached + 0.25 × Cached + Output`).
-- **Cryptographic Receipts**: Embeds tamper-evident machine-readable JSON blocks into PR comments.
-- **Comment Provenance Authentication**: Ignores forged comments from untrusted users; validates against `OWNER`, `MEMBER`, `COLLABORATOR`, or verified bot authors.
-- **Fail-Closed Pagination**: Recursive GraphQL commit pagination guaranteed to evaluate 100% of PR commits across large pull requests (>100 commits).
-- **Commit Status Check Bridge**: Posts commit status checks directly to `headRefOid` via the GitHub REST API, satisfying required branch protections immediately upon comment publication.
-- **Antigravity Harness Integration**: Seamlessly hooks into Antigravity's tool lifecycle (`PreToolUse`, `PostToolUse`).
-
----
-
-## Prerequisites
-- **Python**: 3.8 or higher.
-- **Git**: 2.30 or higher (for worktree and commit trailer parsing).
-- **GitHub CLI (`gh`)**: 2.40 or higher, authenticated with `gh auth login` (`repo` scope required for GraphQL PR queries and status posting).
-
----
-
-## Installation
-
-### 1. Standalone Python CLI
 ```bash
-pip install git+https://github.com/wryenmeek/antigravity-telemetry-guard.git
-```
-Or install locally in editable mode:
-```bash
-git clone https://github.com/wryenmeek/antigravity-telemetry-guard.git
-cd antigravity-telemetry-guard
-pip install -e .
-```
-*(Once installed, the `antigravity-telemetry` binary is available in `$PATH`. You can also invoke via `python3 -m antigravity_telemetry.cli`.)*
-
-### 2. Antigravity Agent Plugin
-To enable automatic commit trailer injection and local merge guards in Antigravity:
-```bash
-mkdir -p ~/.gemini/config/plugins/
-cp -r plugin ~/.gemini/config/plugins/antigravity-telemetry-guard
+pip install git+https://github.com/wryenmeek/antigravity-guard.git
+antigravity-guard sync-plugin --clean-legacy
 ```
 
-The plugin bundles operational agent rules in `plugin/rules/AGENTS.md`:
-- **Deterministic Commit Receipts**: Enforces `Antigravity-Session-ID: <uuid>` trailers on all commits.
-- **Explicit Repository Context**: Requires agents to supply `--repo <owner>/<repo>` with `gh pr merge` so GraphQL provenance resolution is deterministic.
-- **Worktree Merge Discipline**: Prevents merging directly from inside `.worktrees/` directories and triggers automated post-merge pruning.
-- **Protected Branch Push Prohibition**: Blocks direct pushes to `main` or `master` (`decision: deny`), requiring changes to flow through pull requests.
+For local development with `uv`:
+
+```bash
+git clone https://github.com/wryenmeek/antigravity-guard.git
+cd antigravity-guard
+git config core.hooksPath .githooks
+uv sync --locked --dev
+uv run --locked antigravity-guard sync-plugin --clean-legacy
+```
 
 ---
 
-## GitHub Actions CI Integration
+## GitHub Actions Usage
 
-Add the pre-merge guard workflow to your repository at `.github/workflows/antigravity-telemetry-guard.yml`:
+Both `@v2` and backwards-compatible `@v1` tags are maintained automatically:
 
 ```yaml
-name: Antigravity Telemetry Pre-Merge Guard
-
-on:
-  pull_request:
-    branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
-  issue_comment:
-    types: [ created, edited ]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: "Pull Request number to verify"
-        required: true
-        type: string
-
-permissions:
-  contents: read
-  pull-requests: read
-  issues: read
-  statuses: write
-
-jobs:
-  verify-telemetry-receipts:
-    name: Verify Antigravity Session Telemetry
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request) || github.event_name == 'workflow_dispatch'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Antigravity Telemetry Guard
-        uses: wryenmeek/antigravity-telemetry-guard@v1
-        with:
-          pr-number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
-          post-status: 'true'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+- name: Verify Antigravity Guard
+  uses: wryenmeek/antigravity-guard@v2
+  with:
+    pr-number: ${{ github.event.pull_request.number || github.event.issue.number }}
+    post-status: 'true'
+    github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ---
 
-## CLI Usage
-
-### Post or Refresh PR Telemetry
-Calculates token usage from local Antigravity SQLite databases and posts a verified report comment:
-```bash
-antigravity-telemetry post --pr <PR_NUMBER> [--repo owner/repo] [--timeout 60]
-```
-
-### Verify PR Pre-Merge Guard
-Validates that:
-1. All commit session trailers are accounted for by an authenticated receipt comment.
-2. 100% of PR review conversation threads are resolved (blocks merge if open comments exist).
+## CLI Reference
 
 ```bash
-antigravity-telemetry verify --pr <PR_NUMBER> [--post-status] [--ignore-unresolved-comments] [--repo owner/repo] [--timeout 60]
-```
-
-Options:
-- `--repo owner/repo`: Explicit GitHub repository context (recommended for deterministic CI and agent execution without local git context dependency).
-- `--post-status`: Posts a GitHub commit status check directly to the PR's head commit (`success` or `failure`).
-- `--ignore-unresolved-comments`: Disables review conversation check (verifies telemetry receipts only).
-- `--timeout <sec>`: Subprocess and network execution timeout (default: 60s).
-
-### Prune Merged Branches and Worktrees
-Prunes remote tracking branches, deletes local merged branches, and removes attached git worktrees:
-```bash
-antigravity-telemetry prune [--cwd /path/to/repo] [--quiet]
-```
-*(Also executes automatically via `PostToolUse` lifecycle hook whenever an Antigravity agent runs `gh pr merge` or `git merge`.)*
-
-### Version Check
-```bash
-antigravity-telemetry version
+antigravity-guard post --pr <PR_NUMBER> [--repo owner/repo] [--timeout 60]
+antigravity-guard verify --pr <PR_NUMBER> [--post-status] [--ignore-unresolved-comments] [--repo owner/repo] [--timeout 60]
+antigravity-guard prune [--cwd /path/to/repo] [--quiet]
+antigravity-guard validate-plugin [--repo-root PATH] [--strict]
+antigravity-guard sync-plugin [--repo-root PATH] [--clean-legacy]
+antigravity-guard version
 ```
 
 ---
 
-## Development & Testing
+## Quality Gates
 
-Run unit tests across all test suites:
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked ty check
+uv run --locked actionlint
+uv run --locked pytest -q --cov=antigravity_guard --cov-fail-under=90
 ```
-
----
 
 ## License
 

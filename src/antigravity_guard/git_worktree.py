@@ -37,8 +37,12 @@ def _sanitize_cli_dir(cwd: str | None) -> str:
     return os.path.realpath(normalized) if os.path.exists(normalized) else os.path.abspath(normalized)
 
 
+_GIT_HOOK_ENV_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"})
+
+
 def _run_git(repo_dir: str, *args: str, timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
     """Executes a fixed-binary git subcommand inside `repo_dir` without changing process CWD."""
+    clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_HOOK_ENV_VARS}
     try:
         return subprocess.run(
             ["git", "-C", repo_dir, *args],
@@ -46,6 +50,7 @@ def _run_git(repo_dir: str, *args: str, timeout: int = 10) -> subprocess.Complet
             text=True,
             timeout=timeout,
             check=False,
+            env=clean_env,
         )
     except Exception:
         return None

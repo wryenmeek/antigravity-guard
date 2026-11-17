@@ -15,8 +15,9 @@ if [[ "${#STAGED_PY[@]}" -gt 0 ]]; then
   uv run --locked python -m py_compile "${STAGED_PY[@]}"
 fi
 
-echo "✨ [pre-commit] Running Ruff lint, Ruff format, ty type check, and actionlint..."
+echo "✨ [pre-commit] Running Ruff lint, Ruff format, ty, actionlint, and pytest coverage..."
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked ty check
 uv run --locked actionlint
+uv run --locked pytest -q --cov=antigravity_guard --cov-fail-under=90

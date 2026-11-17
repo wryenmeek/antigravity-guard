@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import antigravity_guard.cli as guard_cli
-from tests.conftest import GitWorktreeFixture
+from tests.conftest import GitWorktreeFixture, _clean_git_env
 
 
 def test_real_worktree_blocks_merge_and_prunes_cleanly(git_worktree_env: GitWorktreeFixture) -> None:
@@ -39,6 +39,7 @@ def test_real_worktree_blocks_merge_and_prunes_cleanly(git_worktree_env: GitWork
         capture_output=True,
         text=True,
         check=True,
+        env=_clean_git_env(),
     )
     assert branches.stdout.strip() == ""
 
