@@ -223,6 +223,106 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         cli.handle_post_tool_hook()
         mock_prune.assert_called_once_with("/repo", quiet=True)
 
+    @patch("subprocess.run")
+    def test_get_repo_owner_and_name_from_git_remote(self, mock_run):
+        # SSH remote
+        mock_run.return_value = MagicMock(returncode=0, stdout="git@github.com:test-org/test-project.git\n")
+        owner, name = cli.get_repo_owner_and_name(cwd="/repo")
+        self.assertEqual(owner, "test-org")
+        self.assertEqual(name, "test-project")
+
+        # HTTPS remote
+        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/test-org/test-project-https.git\n")
+        owner, name = cli.get_repo_owner_and_name(cwd="/repo")
+        self.assertEqual(owner, "test-org")
+        self.assertEqual(name, "test-project-https")
+
+    @patch("subprocess.run")
+    @patch("os.path.isdir", return_value=True)
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_handle_pre_tool_hook_worktree_blocking(self, mock_stdout, mock_isdir, mock_run):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            mock = MagicMock(returncode=0, stderr="")
+            if "--git-dir" in cmd_str:
+                mock.stdout = "/repo/.git/worktrees/feature-wt\n"
+            elif "--git-common-dir" in cmd_str:
+                mock.stdout = "/repo/.git\n"
+            return mock
+
+        mock_run.side_effect = side_effect
+        payload = {
+            "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+            "cwd": "/repo/.worktrees/feature-wt",
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "gh pr merge 15 --squash"
+                }
+            }
+        }
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cli.handle_pre_tool_hook()
+
+        output = json.loads(mock_stdout.getvalue())
+        self.assertEqual(output["decision"], "deny")
+        self.assertIn("ANTIGRAVITY WORKTREE GUARD BLOCKED", output["reason"])
+        self.assertIn("/repo/.worktrees/feature-wt", output["reason"])
+
+    @patch("subprocess.run")
+    @patch("os.path.isdir", return_value=True)
+    @patch.object(cli, "verify_pr_telemetry")
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_handle_pre_tool_hook_payload_cwd_resolution(self, mock_stdout, mock_verify, mock_isdir, mock_run):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            mock = MagicMock(returncode=0, stderr="")
+            if "--git-dir" in cmd_str:
+                mock.stdout = ".git\n"
+            elif "--git-common-dir" in cmd_str:
+                mock.stdout = ".git\n"
+            elif "remote.origin.url" in cmd_str:
+                mock.stdout = "https://github.com/wryenmeek/discovered-repo.git\n"
+            return mock
+
+        mock_run.side_effect = side_effect
+        mock_verify.return_value = (True, "Passed", None, "head123")
+
+        payload = {
+            "conversationId": "53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b",
+            "cwd": "/Users/wryen/Documents/Gemini/discovered-repo",
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "gh pr merge 20 --merge"
+                }
+            }
+        }
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cli.handle_pre_tool_hook()
+
+        mock_verify.assert_called_once_with(20, repo="wryenmeek/discovered-repo")
+        output = json.loads(mock_stdout.getvalue())
+        self.assertEqual(output["decision"], "allow")
+
+    @patch.object(cli, "prune_merged_branches_and_worktrees")
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_handle_post_tool_hook_payload_cwd(self, mock_stdout, mock_prune):
+        mock_prune.return_value = {"pruned_branches": [], "pruned_worktrees": []}
+        payload = {
+            "cwd": "/path/from/payload",
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "gh pr merge 10 --merge"
+                }
+            }
+        }
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cli.handle_post_tool_hook()
+
+        mock_prune.assert_called_once_with("/path/from/payload", quiet=True)
+
 
 if __name__ == "__main__":
     unittest.main()

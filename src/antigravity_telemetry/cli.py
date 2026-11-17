@@ -165,18 +165,38 @@ def extract_session_ids_from_text(text: str) -> List[str]:
     return result
 
 
-def get_repo_owner_and_name(repo: Optional[str] = None, timeout: int = 60) -> Tuple[Optional[str], Optional[str]]:
-    """Resolves owner and repo name from parameter, GITHUB_REPOSITORY, or gh CLI."""
+def get_repo_owner_and_name(repo: Optional[str] = None, cwd: Optional[str] = None, timeout: int = 60) -> Tuple[Optional[str], Optional[str]]:
+    """Resolves owner and repo name from parameter, GITHUB_REPOSITORY, git remote, or gh CLI."""
     if repo and "/" in repo:
         parts = repo.split("/", 1)
         return parts[0], parts[1]
     if os.getenv("GITHUB_REPOSITORY") and "/" in os.environ["GITHUB_REPOSITORY"]:
         parts = os.environ["GITHUB_REPOSITORY"].split("/", 1)
         return parts[0], parts[1]
+
+    target_dir = cwd or os.getcwd()
     try:
+        git_remote = subprocess.run(
+            ["git", "-C", target_dir, "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, timeout=5
+        )
+        if git_remote.returncode == 0:
+            m = re.search(r'[:/]([^/]+/[^/]+?)(?:\.git)?$', git_remote.stdout.strip())
+            if m:
+                r_full = m.group(1)
+                if "/" in r_full:
+                    parts = r_full.split("/", 1)
+                    return parts[0], parts[1]
+    except Exception:
+        pass
+
+    try:
+        kwargs = {"timeout": timeout, "capture_output": True, "text": True}
+        if cwd and os.path.isdir(cwd):
+            kwargs["cwd"] = cwd
         res = subprocess.run(
             ["gh", "repo", "view", "--json", "owner,name"],
-            capture_output=True, text=True, timeout=timeout
+            **kwargs
         )
         if res.returncode == 0:
             repo_data = json.loads(res.stdout)
@@ -771,29 +791,81 @@ def handle_pre_tool_hook():
 
     # Check for git merge or gh pr merge at command boundary
     if name == "run_command" and re.search(r"(?:^|[;&|]\s*)\b(gh\s+pr\s+merge|git(?:\s+-[^\s]+)*\s+merge)\b", cmd_line):
-        cwd = args.get("Cwd") if isinstance(args, dict) else None
+        cwd = payload.get("cwd")
+        if not cwd and payload.get("workspacePaths"):
+            cwd = payload["workspacePaths"][0]
+        if not cwd and isinstance(args, dict):
+            cwd = args.get("Cwd")
+
+        repo_root = cwd or os.getcwd()
+        is_worktree = False
         if cwd and os.path.isdir(cwd):
             try:
                 os.chdir(cwd)
             except Exception:
                 pass
 
+            try:
+                git_dir_res = subprocess.run(["git", "-C", cwd, "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=5)
+                common_res = subprocess.run(["git", "-C", cwd, "rev-parse", "--git-common-dir"], capture_output=True, text=True, timeout=5)
+                if git_dir_res.returncode == 0 and common_res.returncode == 0:
+                    git_dir = git_dir_res.stdout.strip()
+                    common_dir = common_res.stdout.strip()
+                    if "worktrees" in git_dir or os.path.abspath(git_dir) != os.path.abspath(common_dir):
+                        is_worktree = True
+
+                    if os.path.isabs(common_dir):
+                        repo_root = os.path.dirname(common_dir)
+                    else:
+                        repo_root = os.path.abspath(os.path.join(cwd, common_dir, ".."))
+            except Exception:
+                pass
+
+        if is_worktree:
+            sys.stdout.write(json.dumps({
+                "decision": "deny",
+                "reason": (
+                    f"[ANTIGRAVITY WORKTREE GUARD BLOCKED]\n"
+                    f"Active working directory is inside a git worktree: {cwd}\n"
+                    f"Executing merges from inside a mounted worktree causes git deletion locks and checkout conflicts.\n\n"
+                    f"Action Required: Switch working directory to primary repository root ({repo_root}) "
+                    f"and detach/remove the worktree before executing merge."
+                )
+            }))
+            return
+
         repo = None
         repo_match = re.search(r'(?:-R|--repo)\s+([^\s]+)', cmd_line)
         if repo_match:
             repo = repo_match.group(1).strip("\"' ,")
-        elif cwd:
-            try:
-                git_remote = subprocess.run(
-                    ["git", "-C", cwd, "config", "--get", "remote.origin.url"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if git_remote.returncode == 0:
-                    m = re.search(r'[:/]([^/]+/[^/]+?)(?:\.git)?$', git_remote.stdout.strip())
-                    if m:
-                        repo = m.group(1)
-            except Exception:
-                pass
+        elif cwd or repo_root:
+            target_dirs = [d for d in [cwd, repo_root] if d and os.path.isdir(d)]
+            for d in target_dirs:
+                try:
+                    git_remote = subprocess.run(
+                        ["git", "-C", d, "config", "--get", "remote.origin.url"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if git_remote.returncode == 0:
+                        m = re.search(r'[:/]([^/]+/[^/]+?)(?:\.git)?$', git_remote.stdout.strip())
+                        if m:
+                            repo = m.group(1)
+                            break
+                except Exception:
+                    pass
+
+                if not repo:
+                    try:
+                        gh_res = subprocess.run(
+                            ["gh", "repo", "view", "--json", "owner,name"],
+                            cwd=d, capture_output=True, text=True, timeout=5
+                        )
+                        if gh_res.returncode == 0:
+                            r_data = json.loads(gh_res.stdout)
+                            repo = f"{r_data['owner']['login']}/{r_data['name']}"
+                            break
+                    except Exception:
+                        pass
 
         match = re.search(r"(?:^|[;&|]\s*)\bgh\s+pr\s+merge\s+(\d+)", cmd_line)
         if match:
@@ -819,6 +891,18 @@ def prune_merged_branches_and_worktrees(cwd: Optional[str] = None, quiet: bool =
     and safely removes any associated git worktrees.
     """
     repo_root = cwd or os.getcwd()
+
+    # Resolve primary repository root if cwd is inside a worktree
+    try:
+        common_res = subprocess.run(["git", "-C", repo_root, "rev-parse", "--git-common-dir"], capture_output=True, text=True, timeout=5)
+        if common_res.returncode == 0:
+            common_dir = common_res.stdout.strip()
+            if os.path.isabs(common_dir):
+                repo_root = os.path.dirname(common_dir)
+            else:
+                repo_root = os.path.abspath(os.path.join(repo_root, common_dir, ".."))
+    except Exception:
+        pass
 
     # 1. Run git fetch --prune
     try:
@@ -948,7 +1032,11 @@ def handle_post_tool_hook():
     name = tool_call.get("name", "")
     args = tool_call.get("args", {})
     cmd_line = args.get("CommandLine", "") if isinstance(args, dict) else ""
-    cwd = args.get("Cwd") if isinstance(args, dict) else None
+    cwd = payload.get("cwd")
+    if not cwd and payload.get("workspacePaths"):
+        cwd = payload["workspacePaths"][0]
+    if not cwd and isinstance(args, dict):
+        cwd = args.get("Cwd")
 
     # Check if a merge command just executed at command boundary
     if name == "run_command" and re.search(r"(?:^|[;&|]\s*)\b(gh\s+pr\s+merge|git(?:\s+-[^\s]+)*\s+merge)\b", cmd_line):
@@ -999,7 +1087,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "version":
-        print("antigravity-telemetry-guard v1.2.0")
+        print("antigravity-telemetry-guard v1.2.1")
         sys.exit(0)
     elif args.command == "prune":
         prune_merged_branches_and_worktrees(args.cwd, quiet=args.quiet)
