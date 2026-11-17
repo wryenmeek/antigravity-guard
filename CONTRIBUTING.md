@@ -40,6 +40,10 @@ When developing or modifying `PreToolUse` or `PostToolUse` hook handlers in `cli
    - If omitted, resolve dynamically using `git -C <cwd> config --get remote.origin.url` (supporting both SSH `git@github.com:...` and HTTPS `https://github.com/...` syntax), falling back to `gh repo view --json owner,name`.
    - Never assume commands run against the current process directory; always pass explicit directory context (`-C <cwd>` or `cwd=<cwd>`).
 
+4. **Protected Branch Push Prohibition**:
+   - `PreToolUse` must intercept `git push` commands targeting `main` or `master` (explicitly or via checked-out branch default), returning `decision: deny`.
+   - Tag pushes (`--tags`, `refs/tags/*`) and dedicated feature branch pushes must remain permitted.
+
 ---
 
 ## 3. Pre-Merge Verification & CI Quality Standards

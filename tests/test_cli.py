@@ -339,6 +339,9 @@ class TestAntigravityTelemetryCli(unittest.TestCase):
         self.assertFalse(cli.is_direct_push_to_main("git push -u origin fix/issue-1"))
         self.assertFalse(cli.is_direct_push_to_main("git push origin --delete feat/temp"))
         self.assertFalse(cli.is_direct_push_to_main("git push", current_branch="feat/my-branch"))
+        self.assertFalse(cli.is_direct_push_to_main("git push --tags", current_branch="main"))
+        self.assertFalse(cli.is_direct_push_to_main("git push origin --tags", current_branch="main"))
+        self.assertFalse(cli.is_direct_push_to_main("git push origin refs/tags/v1.3.0", current_branch="main"))
 
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_handle_pre_tool_hook_blocks_direct_push_to_main(self, mock_stdout):

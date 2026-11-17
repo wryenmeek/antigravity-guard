@@ -45,3 +45,4 @@ antigravity-telemetry prune [--cwd <PATH>] [--quiet]
 
 - **Explicit Repo Context on Merge**: When running `gh pr merge`, always provide `--repo <owner>/<repo>` (or `-R <owner>/<repo>`) so the pre-tool harness hook resolves repository commit history without local git discovery issues.
 - **Worktree Safety**: Avoid running `gh pr merge --delete-branch` with working directory set inside a `.worktrees/` directory. Detach to root first.
+- **Protected Branch Push Prohibition**: Never push directly to `main` or `master`. The harness hook intercepts and blocks direct pushes; all modifications must be pushed to a feature branch and merged via `gh pr create` and `gh pr merge`.
