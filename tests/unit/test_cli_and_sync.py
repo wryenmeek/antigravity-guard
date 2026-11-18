@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import antigravity_guard.cli as cli
-from antigravity_guard import git_worktree, github, plugin_sync, telemetry
+from antigravity_guard import __version__, git_worktree, github, plugin_sync, telemetry
 
 
 def test_cli_main_dispatch_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,7 +131,7 @@ def test_plugin_validate_and_sync_local_removes_legacy_plugin(tmp_path: Path, mo
     (plugin_dir / "assets").mkdir(parents=True)
     (plugin_dir / "skills" / "antigravity-guard").mkdir(parents=True)
     (plugin_dir / "rules").mkdir(parents=True)
-    (repo_root / "pyproject.toml").write_text('[project]\nversion = "2.0.0"\n', encoding="utf-8")
+    (repo_root / "pyproject.toml").write_text(f'[project]\nversion = "{__version__}"\n', encoding="utf-8")
     (plugin_dir / "assets" / "logo.svg").write_text("<svg></svg>", encoding="utf-8")
     (plugin_dir / "hooks.json").write_text("{}", encoding="utf-8")
     (plugin_dir / "skills" / "antigravity-guard" / "SKILL.md").write_text("# skill\n", encoding="utf-8")
@@ -141,7 +141,7 @@ def test_plugin_validate_and_sync_local_removes_legacy_plugin(tmp_path: Path, mo
             {
                 "name": "antigravity-guard",
                 "displayName": "Antigravity Guard",
-                "version": "2.0.0",
+                "version": __version__,
                 "logo": "assets/logo.svg",
                 "suggestedPrompts": ["verify"],
             }
@@ -172,7 +172,7 @@ def test_plugin_validate_and_sync_local_removes_legacy_plugin(tmp_path: Path, mo
     res = plugin_sync.sync_plugin_local(repo_root=repo_root, target_config_dir=dest_dir, clean_legacy=True)
     assert res["removed_legacy"] is True
     assert not legacy_dir.exists()
-    assert json.loads((dest_dir / "installed_version.json").read_text(encoding="utf-8")) == {"version": "2.0.0"}
+    assert json.loads((dest_dir / "installed_version.json").read_text(encoding="utf-8")) == {"version": __version__}
 
     # Negative validation branches
     (plugin_dir / "hooks.json").write_text("{bad json", encoding="utf-8")

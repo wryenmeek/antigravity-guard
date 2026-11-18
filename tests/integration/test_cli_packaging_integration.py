@@ -21,7 +21,7 @@ def _cli_exe(name: str) -> str:
 
 
 def test_cli_entrypoints_version_and_strict_plugin_validation() -> None:
-    """Both antigravity-guard and antigravity-telemetry CLIs report v2.0.0 and validate plugin strictly."""
+    """Both antigravity-guard and antigravity-telemetry CLIs report v2.0.1 and validate plugin strictly."""
     for exe_name in ("antigravity-guard", "antigravity-telemetry"):
         proc = subprocess.run(
             [_cli_exe(exe_name), "version"],
@@ -31,7 +31,7 @@ def test_cli_entrypoints_version_and_strict_plugin_validation() -> None:
             timeout=15,
         )
         assert proc.returncode == 0, proc.stderr
-        assert "antigravity-guard v2.0.0" in proc.stdout
+        assert "antigravity-guard v2.0.1" in proc.stdout
 
     val_proc = subprocess.run(
         [_cli_exe("antigravity-guard"), "validate-plugin", "--repo-root", str(REPO_ROOT), "--strict"],
