@@ -78,6 +78,8 @@ def _is_allowed_skill_file(target: Path, repo_root: Path) -> bool:
     allowed_roots = [
         resolved_repo,
         Path(os.path.expanduser("~/.gemini")).resolve(),
+        Path(os.path.expanduser("~/.agents")).resolve(),
+        Path(os.path.expanduser("~/.agent")).resolve(),
     ]
     return any(target.is_relative_to(root) for root in allowed_roots)
 

@@ -64,6 +64,9 @@ def _parent_has_subagent_invocation(parent_log: Path, subagent_uuid: str) -> boo
                     return True
             if "invoke_subagent" in raw_line and subagent_uuid in raw_line.lower():
                 return True
+            content_str = str(entry.get("content", "")).lower()
+            if subagent_uuid in content_str and ("subagent" in content_str or "conversationid" in content_str):
+                return True
     return False
 
 

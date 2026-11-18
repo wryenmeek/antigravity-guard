@@ -33,8 +33,8 @@ def _compute_mccabe(fn_node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
 
 
 def test_version_and_shim_identity() -> None:
-    """Package version is 2.0.0 and legacy module aliases canonical module object."""
-    assert antigravity_guard.__version__ == "2.0.0"
+    """Package version is 2.0.1 and legacy module aliases canonical module object."""
+    assert antigravity_guard.__version__ == "2.0.1"
     assert legacy_cli is guard_cli
 
 
@@ -150,7 +150,7 @@ def test_plugin_manifest_satisfies_strict_metadata() -> None:
     manifest_path = REPO_ROOT / "plugin" / "plugin.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert data["name"] == "antigravity-guard"
-    assert data["version"] == "2.0.0"
+    assert data["version"] == "2.0.1"
     assert data.get("displayName") == "Antigravity Guard"
     logo_rel = data.get("logo")
     assert isinstance(logo_rel, str) and logo_rel

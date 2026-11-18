@@ -1,7 +1,7 @@
 {
   "name": "antigravity-guard",
   "displayName": "Antigravity Guard",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Enforces deterministic commit receipts, skill execution provenance, adversarial issue audits, automated PR spend telemetry, and pre-merge validation gates via harness hooks",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [

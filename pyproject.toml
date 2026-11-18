@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antigravity-guard"
-version = "2.0.0"
+version = "2.0.1"
 description = "Global Antigravity guardrails: commit receipts, skill provenance, adversarial issue audits, PR token telemetry, and pre-merge gates"
 readme = "README.md"
 license = { text = "MIT" }
