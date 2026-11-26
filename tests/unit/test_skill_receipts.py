@@ -170,3 +170,84 @@ def test_verify_skills_opt_in_freshness_and_plugin_data_fallback(
         env_extra={"PLUGIN_DATA": str(plugin_data)},
     )
     assert ok_res.returncode == 0, ok_res.stdout + ok_res.stderr
+
+
+def test_skill_name_normalization_and_brace_expansion(
+    git_worktree_env: GitWorktreeFixture,
+) -> None:
+    """#9 & #12.3: snake_case receipts satisfy kebab-case rules, and `{a,b}` globs match."""
+    repo = git_worktree_env.repo_dir
+    req_file = repo / ".github" / "required-skills.json"
+    req_file.parent.mkdir(parents=True)
+    req_file.write_text(
+        json.dumps(
+            {
+                "rules": [
+                    {
+                        "pattern": "src/**/*.{js,ts}",
+                        "required_skills": ["firebase-ai-logic-basics"],
+                        "enforcement": "gate",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ts_file = repo / "src" / "client.ts"
+    ts_file.parent.mkdir(parents=True)
+    ts_file.write_text("export const x = 1;\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "src/client.ts"], check=True, capture_output=True, env=_clean_git_env())
+
+    skill_md = repo / "plugins" / "firebase" / "skills" / "firebase_ai_logic_basics" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("---\nname: firebase-ai-logic-basics\n---\n", encoding="utf-8")
+
+    cid = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+    ev = {"conversationId": cid, "cwd": str(repo), "toolCall": {"name": "read_file", "args": {"Path": str(skill_md)}}}
+    with patch("sys.stdin", io.StringIO(json.dumps(ev))), patch("sys.stdout", io.StringIO()):
+        cli.handle_post_tool_hook()
+
+    res = _run_cli(["verify-skills", "--cwd", str(repo), "--staged-only", "--session-id", cid])
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_verify_skills_non_staged_uses_git_commit_timestamp_not_checkout_mtime(
+    git_worktree_env: GitWorktreeFixture,
+) -> None:
+    """#12.1: Non-staged CI verification uses git commit timestamp rather than runner checkout st_mtime."""
+    repo = git_worktree_env.repo_dir
+    req_file = repo / ".github" / "required-skills.json"
+    req_file.parent.mkdir(parents=True)
+    req_file.write_text(
+        json.dumps({"rules": [{"pattern": "*.py", "required_skills": ["ce-code-review"], "enforcement": "gate"}]}),
+        encoding="utf-8",
+    )
+    py_file = repo / "worker.py"
+    py_file.write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "worker.py", ".github/required-skills.json"],
+        check=True,
+        capture_output=True,
+        env=_clean_git_env(),
+    )
+    env = dict(_clean_git_env(), GIT_COMMITTER_DATE="2026-01-01T00:00:00Z", GIT_AUTHOR_DATE="2026-01-01T00:00:00Z")
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "feat: historical commit"],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+    # Simulate actions/checkout setting filesystem mtime to far in the future (now + 1000s)
+    future = time.time() + 1000.0
+    os.utime(py_file, (future, future))
+
+    # Receipt recorded after the historical commit timestamp (2026-01-01) must still pass in non-staged mode
+    state_file = repo / ".github" / "hooks" / "state" / "skill-receipts.jsonl"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps({"skill": "ce-code-review", "epoch": 1767229200.0, "sessionId": "s1"}) + "\n",
+        encoding="utf-8",
+    )
+    res = _run_cli(["verify-skills", "--cwd", str(repo)])
+    assert res.returncode == 0, res.stdout + res.stderr
