@@ -363,7 +363,12 @@ def _check_merge_issue_audits(repo_root: str | None, payload: dict[str, Any]) ->
 
 def _extract_gh_merge_pr_num(merge_seg: list[str]) -> int | None:
     """Extracts PR number from a `gh pr merge <N>` command segment."""
-    if len(merge_seg) >= 4 and Path(merge_seg[0]).name == "gh" and merge_seg[1:3] == ["pr", "merge"] and merge_seg[3].isdigit():
+    if (
+        len(merge_seg) >= 4
+        and Path(merge_seg[0]).name == "gh"
+        and merge_seg[1:3] == ["pr", "merge"]
+        and merge_seg[3].isdigit()
+    ):
         return int(merge_seg[3])
     return None
 

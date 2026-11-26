@@ -339,7 +339,9 @@ def verify_issue_audits(
     if mode != "strict" and issue_num is None and not existing_ledgers and not closed_ids:
         return True, f"Repository {repo_root.name} is not opted in to issue audits."
 
-    staged = sorted(set(_git_files(repo_root, staged_only=True)) | set(extra_staged_paths or [])) if mode == "commit" else []
+    staged = (
+        sorted(set(_git_files(repo_root, staged_only=True)) | set(extra_staged_paths or [])) if mode == "commit" else []
+    )
     if mode == "commit" and not closed_ids and ("Gate-3-Red: true" in commit_msg or is_bootstrap_only_paths(staged)):
         return True, "Bootstrap / Gate-3-Red commit allowed without closing issue audits."
 
