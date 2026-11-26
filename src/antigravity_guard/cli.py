@@ -25,6 +25,7 @@ from antigravity_guard.hooks import (
     is_direct_push_to_main,
 )
 from antigravity_guard.issue_audit import handle_stop_hook, verify_issue_audits
+from antigravity_guard.issue_lint import lint_issue
 from antigravity_guard.plugin_sync import sync_plugin_local, validate_plugin_bundle
 from antigravity_guard.skill_receipts import verify_skills
 from antigravity_guard.telemetry import (
@@ -57,6 +58,7 @@ __all__ = [
     "handle_stop_hook",
     "handle_stop_hook_cli",
     "is_direct_push_to_main",
+    "lint_issue",
     "main",
     "parse_varints",
     "post_commit_status",
@@ -113,6 +115,12 @@ def _add_gate_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     p_issue.add_argument(
         "--no-verify-transcripts", action="store_true", help="Skip local ~/.gemini transcript checks (CI)"
     )
+
+    p_lint = subparsers.add_parser("lint-issue", help="Validate issue readiness against Pre-ready-for-agent gate")
+    p_lint.add_argument("--cwd", type=Path, default=None, help="Target repository directory")
+    p_lint.add_argument("--issue", type=int, default=None, help="GitHub issue number")
+    p_lint.add_argument("--file", type=Path, default=None, help="Local issue markdown file")
+    p_lint.add_argument("--repo", type=str, default=None, help="Optional owner/repo")
 
 
 def _add_maintenance_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -212,6 +220,12 @@ def _run_verify_issue(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _run_lint_issue(args: argparse.Namespace) -> int:
+    ok, msg = lint_issue(args.cwd, issue_num=args.issue, file_path=args.file, repo=args.repo)
+    (sys.stdout if ok else sys.stderr).write(msg + "\n")
+    return 0 if ok else 1
+
+
 def _run_validate_plugin(args: argparse.Namespace) -> int:
     ok, errors = validate_plugin_bundle(repo_root=args.repo_root, strict=args.strict)
     if ok:
@@ -238,6 +252,7 @@ def main() -> None:
         "verify": lambda: _run_verify(args),
         "verify-skills": lambda: _run_verify_skills(args),
         "verify-issue": lambda: _run_verify_issue(args),
+        "lint-issue": lambda: _run_lint_issue(args),
         "hook-pre-tool": lambda: (handle_pre_tool_hook(), 0)[1],
         "hook-post-tool": lambda: (handle_post_tool_hook(), 0)[1],
         "hook-stop": lambda: (handle_stop_hook_cli(), 0)[1],
