@@ -417,9 +417,7 @@ def _build_external_attestation_section(external_sessions: list[dict[str, str]])
     """Renders markdown attestation table for non-Antigravity/external tool commits."""
     if not external_sessions:
         return ""
-    rows = "\n".join(
-        f"| `{e['sha']}` | {e['tool']} | `{e['session_id']}` |" for e in external_sessions
-    )
+    rows = "\n".join(f"| `{e['sha']}` | {e['tool']} | `{e['session_id']}` |" for e in external_sessions)
     return (
         "\n### External / Non-Antigravity Session Attestation\n\n"
         "| Commit | Source Tool | External Session ID |\n"

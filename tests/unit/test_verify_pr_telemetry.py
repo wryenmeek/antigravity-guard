@@ -467,9 +467,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch("subprocess.run")
     @patch.object(vpr, "get_session_telemetry")
     @patch.object(vpr, "get_pr_commits")
-    def test_mixed_tool_pr_post_includes_external_attestation_and_receipt(
-        self, mock_commits, mock_tel, mock_run
-    ):
+    def test_mixed_tool_pr_post_includes_external_attestation_and_receipt(self, mock_commits, mock_tel, mock_run):
         mock_commits.return_value = [
             {
                 "oid": "11111111aaaa",
@@ -494,7 +492,9 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             "gross_context": 5200,
             "billed_tokens_75": 1825,
         }
-        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/org/repo/pull/32#comment-1", stderr="")
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/org/repo/pull/32#comment-1", stderr=""
+        )
 
         ok = vpr.generate_and_post_telemetry(32, repo="org/repo")
         self.assertTrue(ok)
@@ -508,9 +508,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     @patch.object(vpr, "get_unresolved_review_threads", return_value=[])
     @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_mixed_tool_pr_verify_requires_external_session_coverage(
-        self, mock_comments, mock_commits, _mock_threads
-    ):
+    def test_mixed_tool_pr_verify_requires_external_session_coverage(self, mock_comments, mock_commits, _mock_threads):
         mock_commits.return_value = (
             [
                 {
@@ -532,7 +530,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             "cache_hit_pct": 90.0,
         }
         mock_comments.return_value = [
-            {"body": f"{vpr.RECEIPT_START}\n{json.dumps(incomplete_receipt)}\n{vpr.RECEIPT_END}", "authorAssociation": "OWNER"}
+            {
+                "body": f"{vpr.RECEIPT_START}\n{json.dumps(incomplete_receipt)}\n{vpr.RECEIPT_END}",
+                "authorAssociation": "OWNER",
+            }
         ]
         passed_bad, msg_bad, _, _ = vpr.verify_pr_telemetry(32)
         self.assertFalse(passed_bad)
@@ -541,7 +542,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
 
         complete_receipt = dict(incomplete_receipt, external_session_ids=["0ba7b819-f031-4b58-affb-e5bae59ff052"])
         mock_comments.return_value = [
-            {"body": f"{vpr.RECEIPT_START}\n{json.dumps(complete_receipt)}\n{vpr.RECEIPT_END}", "authorAssociation": "OWNER"}
+            {
+                "body": f"{vpr.RECEIPT_START}\n{json.dumps(complete_receipt)}\n{vpr.RECEIPT_END}",
+                "authorAssociation": "OWNER",
+            }
         ]
         passed_ok, msg_ok, _, _ = vpr.verify_pr_telemetry(32)
         self.assertTrue(passed_ok)
