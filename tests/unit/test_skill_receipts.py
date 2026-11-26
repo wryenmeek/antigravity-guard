@@ -196,7 +196,9 @@ def test_skill_name_normalization_and_brace_expansion(
     ts_file = repo / "src" / "client.ts"
     ts_file.parent.mkdir(parents=True)
     ts_file.write_text("export const x = 1;\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "src/client.ts"], check=True, capture_output=True, env=_clean_git_env())
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "src/client.ts"], check=True, capture_output=True, env=_clean_git_env()
+    )
 
     skill_md = repo / "plugins" / "firebase" / "skills" / "firebase_ai_logic_basics" / "SKILL.md"
     skill_md.parent.mkdir(parents=True)
