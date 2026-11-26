@@ -46,6 +46,17 @@ def is_bootstrap_only_paths(paths: list[str]) -> bool:
     return True
 
 
+def _entry_invoked_subagent(entry: dict[str, Any], subagent_uuid: str) -> bool:
+    """Checks a single non-error transcript entry for an explicit `invoke_subagent` call/result."""
+    for tc in entry.get("tool_calls", []):
+        if isinstance(tc, dict) and tc.get("name") == "invoke_subagent" and subagent_uuid in json.dumps(tc).lower():
+            return True
+    tool_name = entry.get("tool") or entry.get("name")
+    if tool_name == "invoke_subagent" and subagent_uuid in json.dumps(entry).lower():
+        return "[ANTIGRAVITY ISSUE" not in str(entry.get("content", ""))
+    return False
+
+
 def _parent_has_subagent_invocation(parent_log: Path, subagent_uuid: str) -> bool:
     """Confirms `subagent_uuid` appears inside an `invoke_subagent` step in parent `transcriptPath`."""
     if not parent_log.is_file():
@@ -55,17 +66,9 @@ def _parent_has_subagent_invocation(parent_log: Path, subagent_uuid: str) -> boo
             continue
         with contextlib.suppress(json.JSONDecodeError):
             entry = json.loads(raw_line)
-            for tc in entry.get("tool_calls", []) if isinstance(entry, dict) else []:
-                if (
-                    isinstance(tc, dict)
-                    and tc.get("name") == "invoke_subagent"
-                    and subagent_uuid in json.dumps(tc).lower()
-                ):
-                    return True
-            if "invoke_subagent" in raw_line and subagent_uuid in raw_line.lower():
-                return True
-            content_str = str(entry.get("content", "")).lower()
-            if subagent_uuid in content_str and ("subagent" in content_str or "conversationid" in content_str):
+            if not isinstance(entry, dict) or str(entry.get("status", "")).upper() == "ERROR":
+                continue
+            if _entry_invoked_subagent(entry, subagent_uuid):
                 return True
     return False
 
@@ -239,13 +242,83 @@ def validate_audit_ledger(
     ]
 
 
+def _find_default_merge_base(repo_root: Path) -> str | None:
+    """Finds merge-base commit between HEAD and the repository's default branch, if any."""
+    head_res = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=_clean_env(),
+    )
+    if head_res.returncode == 0 and head_res.stdout.strip() in {"main", "master"}:
+        return "HEAD"
+    for ref in ("main", "master", "origin/main", "origin/master"):
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "merge-base", "HEAD", ref],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_clean_env(),
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    return None
+
+
+def _is_ledger_dirty_or_branch_changed(repo_root: Path, ledger: Path) -> bool:
+    """Returns True if ledger is untracked/modified in working tree or changed on current branch."""
+    rel = str(ledger.relative_to(repo_root))
+    status = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--", rel],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=_clean_env(),
+    )
+    if status.returncode == 0 and status.stdout.strip():
+        return True
+    merge_base = _find_default_merge_base(repo_root)
+    if not merge_base:
+        return False
+    diff = subprocess.run(
+        ["git", "-C", str(repo_root), "diff", "--name-only", f"{merge_base}..HEAD", "--", rel],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=_clean_env(),
+    )
+    return diff.returncode == 0 and bool(diff.stdout.strip())
+
+
+def _read_ledger_phase(ledger: Path) -> str:
+    """Reads `audit_phase` from a ledger file, returning `UNKNOWN` if unreadable."""
+    try:
+        data = json.loads(ledger.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return str(data.get("audit_phase") or "VERIFIED_COMPLETE").upper()
+    except (OSError, json.JSONDecodeError):
+        pass
+    return "UNKNOWN"
+
+
 def _select_target_ledgers(repo_root: Path, issue_num: int | None, closed_ids: list[int]) -> list[Path]:
     reviews_dir = repo_root / ".infigraph" / "reviews"
     if issue_num is not None:
         return [reviews_dir / f"issue_{issue_num}_audit.json"]
     if closed_ids:
         return [reviews_dir / f"issue_{num}_audit.json" for num in closed_ids]
-    return sorted(reviews_dir.glob("issue_*_audit.json")) if reviews_dir.is_dir() else []
+    if not reviews_dir.is_dir():
+        return []
+    return [
+        ledger
+        for ledger in sorted(reviews_dir.glob("issue_*_audit.json"))
+        if _read_ledger_phase(ledger) != "VERIFIED_COMPLETE" or _is_ledger_dirty_or_branch_changed(repo_root, ledger)
+    ]
 
 
 def verify_issue_audits(
@@ -256,6 +329,7 @@ def verify_issue_audits(
     commit_msg: str = "",
     transcript_path: str | Path | None = None,
     verify_transcripts: bool = True,
+    extra_staged_paths: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Enforces `.infigraph/reviews/issue_<N>_audit.json` completeness per 3-rule activation."""
     repo_root = _resolve_repo_root(cwd)
@@ -265,13 +339,15 @@ def verify_issue_audits(
     if mode != "strict" and issue_num is None and not existing_ledgers and not closed_ids:
         return True, f"Repository {repo_root.name} is not opted in to issue audits."
 
-    staged = _git_files(repo_root, staged_only=True) if mode == "commit" else []
+    staged = sorted(set(_git_files(repo_root, staged_only=True)) | set(extra_staged_paths or [])) if mode == "commit" else []
     if mode == "commit" and not closed_ids and ("Gate-3-Red: true" in commit_msg or is_bootstrap_only_paths(staged)):
         return True, "Bootstrap / Gate-3-Red commit allowed without closing issue audits."
 
     allow_seeded = mode == "commit" and not closed_ids and issue_num is None
     targets = _select_target_ledgers(repo_root, issue_num, closed_ids)
     if not targets:
+        if existing_ledgers and issue_num is None and not closed_ids:
+            return True, "All active issue audit ledgers verified (clean historical ledgers skipped)."
         return False, "Strict issue audit enabled, but no .infigraph/reviews/issue_<N>_audit.json files found."
 
     parent_log = Path(transcript_path).resolve() if transcript_path else None

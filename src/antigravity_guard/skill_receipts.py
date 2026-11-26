@@ -14,7 +14,7 @@ from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from antigravity_guard.git_worktree import _GIT_HOOK_ENV_VARS, resolve_git_context, resolve_trusted_cwd
+from antigravity_guard.git_worktree import _GIT_HOOK_ENV_VARS, resolve_trusted_cwd, resolve_worktree_root
 
 _SKILL_PATH_RE = re.compile(r"(?:^|/)(?:(?:\.github|\.agent|\.agents)/skills|skills)/([^/]+)/SKILL\.md$")
 _ROOT_SKILL_RE = re.compile(r"(?:^|/)SKILL\.md$")
@@ -32,13 +32,13 @@ def _clean_env() -> dict[str, str]:
 
 
 def _resolve_repo_root(cwd: str | Path | None) -> Path:
-    """Resolves canonical repository root from an optional path."""
+    """Resolves canonical active worktree/checkout root from an optional path."""
     if cwd is None:
         return Path.cwd().resolve()
     trusted = resolve_trusted_cwd(str(cwd))
     base = Path(trusted) if trusted else Path(str(cwd)).resolve()
-    repo_root, _, _ = resolve_git_context(str(base))
-    return Path(repo_root).resolve() if repo_root else base.resolve()
+    wt_root = resolve_worktree_root(str(base))
+    return Path(wt_root).resolve() if wt_root else base.resolve()
 
 
 def _resolve_git_dir(repo_root: Path) -> Path:

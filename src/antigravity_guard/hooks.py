@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import re
@@ -19,17 +20,73 @@ from antigravity_guard.skill_receipts import (
     verify_skills,
 )
 
-_COMMIT_CMD_RE = re.compile(r"(?:^|[;&|]\s*)\bgit(?:\s+-[^\s]+)*\s+commit\b")
 _NO_VERIFY_RE = re.compile(r"(?:^|\s)(?:--no-verify|-n)(?:\s|$)")
-_PUSH_CMD_RE = re.compile(r"(?:^|[;&|]\s*)\bgit(?:\s+-[^\s]+)*\s+push\b")
-_MERGE_CMD_RE = re.compile(r"(?:^|[;&|]\s*)\b(gh\s+pr\s+merge|git(?:\s+-[^\s]+)*\s+merge)\b")
 _DASH_F_RE = re.compile(r"(?:^|\s)-F\s+(?:\"([^\"]+)\"|'([^']+)'|([^\s]+))")
-_GH_MERGE_PR_RE = re.compile(r"(?:^|[;&|]\s*)\bgh\s+pr\s+merge\s+(\d+)")
 _REPO_FLAG_RE = re.compile(r"(?:-R|--repo)\s+([^\s]+)")
+_SHELL_OPS = frozenset({";", "&", "&&", "|", "||"})
+_GIT_ARG_FLAGS = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix"})
+_MERGE_ABORT_FLAGS = frozenset({"--abort", "--continue", "--quit"})
+_ADD_WILDCARD_ARGS = frozenset({"-A", "--all", "-u", "--update", ".", ".."})
 
 
 def _cli_mod() -> Any:
     return importlib.import_module("antigravity_guard.cli")
+
+
+def _split_shell_segments(cmd_line: str) -> list[list[str]]:
+    """Splits a shell command string into unquoted command-segment token lists."""
+    try:
+        lexer = shlex.shlex(cmd_line, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return [seg.split() for seg in re.split(r"\s*(?:&&|\|\||[;&|])\s*", cmd_line) if seg.strip()]
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for tok in tokens:
+        if tok in _SHELL_OPS:
+            if current:
+                segments.append(current)
+                current = []
+        else:
+            current.append(tok)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _git_subcommand(tokens: list[str]) -> tuple[str, list[str]] | None:
+    """Returns `(subcommand, remaining_args)` if `tokens` is a `git` invocation."""
+    if not tokens or Path(tokens[0]).name != "git":
+        return None
+    idx = 1
+    while idx < len(tokens) and tokens[idx].startswith("-"):
+        idx += 2 if tokens[idx] in _GIT_ARG_FLAGS else 1
+    if idx >= len(tokens):
+        return None
+    return tokens[idx], tokens[idx + 1 :]
+
+
+def _is_push_segment_to_main(tokens: list[str], current_branch: str) -> bool:
+    """Checks a single command segment to see if it pushes directly to main/master."""
+    sub = _git_subcommand(tokens)
+    if not sub or sub[0] != "push":
+        return False
+    args = sub[1]
+    if any(t == "--tags" or t.startswith("refs/tags/") for t in args):
+        return False
+    if "--delete" in args or "-d" in args:
+        return any(t in {"main", "master"} or t.endswith(":main") or t.endswith(":master") for t in args)
+    pos_args = [t for t in args if not t.startswith("-")]
+    if any(t in {"main", "master"} or t.endswith(":main") or t.endswith(":master") for t in pos_args):
+        return True
+    return (not pos_args or pos_args == ["origin"]) and current_branch in {"main", "master"}
+
+
+def is_direct_push_to_main(cmd_line: str, current_branch: str = "") -> bool:
+    """Detects whether any `git push` segment targets protected `main` or `master` directly."""
+    return any(_is_push_segment_to_main(seg, current_branch) for seg in _split_shell_segments(cmd_line))
 
 
 def _extract_payload_cwd(payload: dict[str, Any], args: dict[str, Any]) -> str | None:
@@ -42,22 +99,63 @@ def _extract_payload_cwd(payload: dict[str, Any], args: dict[str, Any]) -> str |
     return str(cwd) if isinstance(cwd, str) else None
 
 
-def is_direct_push_to_main(cmd_line: str, current_branch: str = "") -> bool:
-    """Detects whether a git push command targets protected `main` or `master` directly."""
-    if not _PUSH_CMD_RE.search(cmd_line):
-        return False
-    if re.search(r"(?:^|\s)(?:--tags|refs/tags/[^\s]+)(?:\s|$)", cmd_line):
-        return False
-    if "--delete" in cmd_line or " -d " in cmd_line:
-        return bool(re.search(r"\b(main|master)\b", cmd_line))
-    if re.search(r"(?::|\s)(?:origin\s+)?(?:[^\s:]+:)?(main|master)(?:\s|$)", cmd_line):
-        return True
-    tokens = cmd_line.strip().split()
-    if "push" in tokens:
-        rem_args = [t for t in tokens[tokens.index("push") + 1 :] if not t.startswith("-")]
-        if (not rem_args or rem_args == ["origin"]) and current_branch in {"main", "master"}:
-            return True
-    return False
+def _find_commit_segment(segments: list[list[str]]) -> list[str] | None:
+    """Returns args of the first `git commit` command segment, if present."""
+    for seg in segments:
+        sub = _git_subcommand(seg)
+        if sub and sub[0] == "commit":
+            return sub[1]
+    return None
+
+
+def _has_push_segment(segments: list[list[str]]) -> bool:
+    """Returns True if any command segment is a `git push` invocation."""
+    return any((_git_subcommand(seg) or ("", []))[0] == "push" for seg in segments)
+
+
+def _find_merge_segment(segments: list[list[str]]) -> list[str] | None:
+    """Returns the first `gh pr merge` or non-abort `git merge` segment."""
+    for seg in segments:
+        if len(seg) >= 3 and Path(seg[0]).name == "gh" and seg[1:3] == ["pr", "merge"]:
+            return seg
+        sub = _git_subcommand(seg)
+        if sub and sub[0] == "merge" and not any(f in _MERGE_ABORT_FLAGS for f in sub[1]):
+            return seg
+    return None
+
+
+def _extract_dash_f_path(cmd_line: str, commit_args: list[str] | None = None) -> str | None:
+    """Extracts `-F <path>` or `--file <path>` from `git commit` args or raw command line."""
+    args = commit_args or []
+    for idx, tok in enumerate(args):
+        if tok in {"-F", "--file"} and idx + 1 < len(args):
+            return args[idx + 1]
+        if tok.startswith("--file="):
+            return tok.split("=", 1)[1]
+    match = _DASH_F_RE.search(cmd_line)
+    return next(g for g in match.groups() if g is not None) if match else None
+
+
+def _extract_chained_git_add_paths(segments: list[list[str]], repo_root: Path) -> list[str]:
+    """Extracts explicit `git add <paths>` targets preceding `git commit` in a chained command."""
+    collected: list[str] = []
+    for seg in segments:
+        sub = _git_subcommand(seg)
+        if not sub:
+            continue
+        if sub[0] == "commit":
+            break
+        if sub[0] != "add":
+            continue
+        if any(arg in _ADD_WILDCARD_ARGS for arg in sub[1]):
+            return []
+        for arg in sub[1]:
+            if arg.startswith("-"):
+                continue
+            p = Path(arg)
+            rel = p if not p.is_absolute() else p.resolve().relative_to(repo_root.resolve())
+            collected.append(rel.as_posix().lstrip("./"))
+    return collected
 
 
 def _resolve_commit_msg_file(raw_path: str, base_dir: Path) -> Path | None:
@@ -80,11 +178,38 @@ def _append_trailers_to_file(msg_file: Path, trailers: list[str]) -> tuple[bool,
         return False, f"Failed updating commit message file {msg_file}: {exc}"
 
 
+def _resolve_commit_msg_text(
+    cmd_line: str,
+    commit_args: list[str] | None,
+    trusted_cwd: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Reads `-F <msg-file>` commit message text safely inside `trusted_cwd` if `-F` is present."""
+    raw_path = _extract_dash_f_path(cmd_line, commit_args)
+    if not raw_path:
+        return cmd_line, None
+    base_dir = Path(trusted_cwd) if trusted_cwd else Path.cwd()
+    msg_file = _resolve_commit_msg_file(raw_path, base_dir)
+    if msg_file is None:
+        return None, {
+            "decision": "deny",
+            "reason": (
+                f"[ANTIGRAVITY SECURITY GUARD BLOCKED]\n"
+                f"Blocked `-F {raw_path}` commit message path traversal outside repository root `{base_dir}`."
+            ),
+        }
+    if msg_file.is_file():
+        with contextlib.suppress(OSError):
+            return msg_file.read_text(encoding="utf-8", errors="ignore"), None
+    return cmd_line, None
+
+
 def _check_commit_gates(
     cmd_line: str,
     conv_id: str,
     trusted_cwd: str | None,
     payload: dict[str, Any],
+    segments: list[list[str]] | None = None,
+    commit_args: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Blocks `--no-verify` and validates opt-in skill receipts & issue audit gates on commit."""
     if _NO_VERIFY_RE.search(cmd_line):
@@ -92,6 +217,9 @@ def _check_commit_gates(
             "decision": "deny",
             "reason": "[ANTIGRAVITY COMMIT GUARD BLOCKED]\nBypassing git hooks via `--no-verify` / `-n` is prohibited.",
         }
+    commit_msg_text, path_denial = _resolve_commit_msg_text(cmd_line, commit_args, trusted_cwd)
+    if path_denial is not None:
+        return path_denial
     if not trusted_cwd:
         return None
 
@@ -99,13 +227,16 @@ def _check_commit_gates(
     if not ok_skills:
         return {"decision": "deny", "reason": f"[ANTIGRAVITY SKILL GATE BLOCKED]\n{skill_msg}"}
 
+    repo_root = _resolve_repo_root(trusted_cwd)
+    extra_staged = _extract_chained_git_add_paths(segments or [], repo_root)
     transcript = payload.get("transcriptPath")
     ok_issue, issue_msg = verify_issue_audits(
         trusted_cwd,
         mode="commit",
-        commit_msg=cmd_line,
+        commit_msg=commit_msg_text or cmd_line,
         transcript_path=str(transcript) if transcript else None,
         verify_transcripts=True,
+        extra_staged_paths=extra_staged,
     )
     if not ok_issue:
         return {"decision": "deny", "reason": f"[ANTIGRAVITY ISSUE GATE BLOCKED]\n{issue_msg}"}
@@ -153,10 +284,12 @@ def _handle_commit_hook(
     conv_id: str,
     raw_cwd: str | None,
     payload: dict[str, Any],
+    segments: list[list[str]] | None = None,
+    commit_args: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Enforces commit pre-gates, `-F` path-traversal safety, and trailer/footer injection."""
     trusted_cwd = resolve_trusted_cwd(raw_cwd) if raw_cwd else None
-    gate_denial = _check_commit_gates(cmd_line, conv_id, trusted_cwd, payload)
+    gate_denial = _check_commit_gates(cmd_line, conv_id, trusted_cwd, payload, segments, commit_args)
     if gate_denial is not None:
         return gate_denial
 
@@ -164,9 +297,8 @@ def _handle_commit_hook(
     if not trailers:
         return None
 
-    f_match = _DASH_F_RE.search(cmd_line)
-    if f_match:
-        raw_path = next(g for g in f_match.groups() if g is not None)
+    raw_path = _extract_dash_f_path(cmd_line, commit_args)
+    if raw_path:
         return _rewrite_dash_f_commit(cmd_line, raw_path, trusted_cwd, trailers)
 
     mutated = cmd_line
@@ -229,7 +361,19 @@ def _check_merge_issue_audits(repo_root: str | None, payload: dict[str, Any]) ->
     return {"decision": "deny", "reason": f"[ANTIGRAVITY ISSUE MERGE GUARD BLOCKED]\n{msg}"}
 
 
-def _handle_merge_hook(cmd_line: str, raw_cwd: str | None, payload: dict[str, Any]) -> dict[str, Any] | None:
+def _extract_gh_merge_pr_num(merge_seg: list[str]) -> int | None:
+    """Extracts PR number from a `gh pr merge <N>` command segment."""
+    if len(merge_seg) >= 4 and Path(merge_seg[0]).name == "gh" and merge_seg[1:3] == ["pr", "merge"] and merge_seg[3].isdigit():
+        return int(merge_seg[3])
+    return None
+
+
+def _handle_merge_hook(
+    cmd_line: str,
+    raw_cwd: str | None,
+    payload: dict[str, Any],
+    merge_seg: list[str] | None = None,
+) -> dict[str, Any] | None:
     """Enforces worktree safety, issue audit completion, and PR telemetry before merging."""
     repo_root, is_worktree, _ = resolve_git_context(raw_cwd)
     if is_worktree:
@@ -248,10 +392,9 @@ def _handle_merge_hook(cmd_line: str, raw_cwd: str | None, payload: dict[str, An
     if audit_denial is not None:
         return audit_denial
 
-    pr_match = _GH_MERGE_PR_RE.search(cmd_line)
-    if not pr_match:
+    pr_num = _extract_gh_merge_pr_num(merge_seg or [])
+    if pr_num is None:
         return None
-    pr_num = int(pr_match.group(1))
     repo_slug = _discover_repo_slug_for_merge(cmd_line, raw_cwd, repo_root)
     passed, msg, _, _ = _cli_mod().verify_pr_telemetry(pr_num, repo=repo_slug)
     if passed:
@@ -277,16 +420,21 @@ def _evaluate_pre_tool_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_cwd = _extract_payload_cwd(payload, args)
     conv_id = str(payload.get("conversationId", ""))
 
-    checks = (
-        (_COMMIT_CMD_RE, lambda: _handle_commit_hook(cmd_line, conv_id, raw_cwd, payload)),
-        (_PUSH_CMD_RE, lambda: _handle_push_hook(cmd_line, raw_cwd)),
-        (_MERGE_CMD_RE, lambda: _handle_merge_hook(cmd_line, raw_cwd, payload)),
-    )
-    for pattern, handler in checks:
-        if pattern.search(cmd_line):
-            decision = handler()
-            if decision is not None:
-                return decision
+    segments = _split_shell_segments(cmd_line)
+    commit_args = _find_commit_segment(segments)
+    if commit_args is not None:
+        decision = _handle_commit_hook(cmd_line, conv_id, raw_cwd, payload, segments, commit_args)
+        if decision is not None:
+            return decision
+    if _has_push_segment(segments):
+        decision = _handle_push_hook(cmd_line, raw_cwd)
+        if decision is not None:
+            return decision
+    merge_seg = _find_merge_segment(segments)
+    if merge_seg is not None:
+        decision = _handle_merge_hook(cmd_line, raw_cwd, payload, merge_seg)
+        if decision is not None:
+            return decision
     return {"decision": "allow"}
 
 
@@ -318,7 +466,7 @@ def handle_post_tool_hook() -> None:
     raw_cwd = _extract_payload_cwd(payload, args)
     cmd_line = str(args.get("CommandLine", ""))
 
-    if tool_call.get("name") == "run_command" and _MERGE_CMD_RE.search(cmd_line):
+    if tool_call.get("name") == "run_command" and _find_merge_segment(_split_shell_segments(cmd_line)) is not None:
         try:
             prune_res = _cli_mod().prune_merged_branches_and_worktrees(raw_cwd, quiet=True)
             branches = prune_res.get("pruned_branches", [])
