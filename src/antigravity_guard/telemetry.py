@@ -20,6 +20,10 @@ DEFAULT_TIMEOUT_SEC = 60
 
 _METADATA_SQL = "SELECT idx, data FROM gen_metadata ORDER BY idx"
 _SESSION_ID_RE = re.compile(r"Antigravity-Session-ID:\s*([a-f0-9\-]{36})", re.IGNORECASE)
+_EXTERNAL_SESSION_RE = re.compile(
+    r"^(?P<prefix>Claude|External)-Session-ID:\s*(?P<sid>[a-zA-Z0-9._\-]{4,128})(?:\s+\((?P<tool>[^)]+)\))?",
+    re.IGNORECASE | re.MULTILINE,
+)
 _UUID_SAFE_RE = re.compile(r"^[a-f0-9\-]{8,64}$", re.IGNORECASE)
 _DEFAULT_CONV_DIRS = (
     "~/.gemini/antigravity/conversations",
@@ -186,6 +190,22 @@ def extract_session_ids_from_text(text: str) -> list[str]:
     return result
 
 
+def extract_external_sessions_from_text(text: str) -> list[tuple[str, str]]:
+    """Extracts unique `(session_id, source_tool)` pairs from `Claude-Session-ID:` / `External-Session-ID:` trailers."""
+    seen: set[str] = set()
+    result: list[tuple[str, str]] = []
+    for match in _EXTERNAL_SESSION_RE.finditer(text):
+        sid = match.group("sid").strip().lower()
+        if sid in seen:
+            continue
+        seen.add(sid)
+        prefix = match.group("prefix").lower()
+        explicit_tool = (match.group("tool") or "").strip()
+        tool = explicit_tool or ("Claude Code" if prefix == "claude" else "External")
+        result.append((sid, tool))
+    return result
+
+
 def _collect_pr_sessions(commits: list[dict[str, Any]]) -> tuple[list[tuple[str, str]], set[str]]:
     """Collects (short_sha, session_id) pairs and the unique session ID set from PR commits."""
     committed_sessions: list[tuple[str, str]] = []
@@ -197,6 +217,21 @@ def _collect_pr_sessions(commits: list[dict[str, Any]]) -> tuple[list[tuple[str,
             committed_sessions.append((sha, cid))
             all_cids.add(cid)
     return committed_sessions, all_cids
+
+
+def _collect_external_sessions(commits: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Collects external-tool session attestations (`sha`, `session_id`, `tool`) from PR commits."""
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for commit in commits:
+        sha = str(commit.get("oid", ""))[:8]
+        msg = f"{commit.get('messageHeadline', '')}\n{commit.get('messageBody', '')}"
+        for sid, tool in extract_external_sessions_from_text(msg):
+            key = (sha, sid)
+            if key not in seen:
+                seen.add(key)
+                entries.append({"sha": sha, "session_id": sid, "tool": tool})
+    return entries
 
 
 def _is_trusted_receipt_comment(comment: Any) -> bool:
@@ -251,9 +286,11 @@ def _evaluate_receipt_coverage(
     committed_sessions: list[tuple[str, str]],
     receipt_data: dict[str, Any] | None,
     head_sha: str | None,
+    external_cids: set[str] | None = None,
 ) -> tuple[bool, str, dict[str, Any] | None, str | None]:
-    """Validates committed session coverage against the PR receipt payload."""
-    if not all_committed_cids:
+    """Validates committed Antigravity and external session coverage against the PR receipt payload."""
+    ext_cids = external_cids or set()
+    if not all_committed_cids and not ext_cids:
         if receipt_data:
             billed = receipt_data.get("total_billed_tokens", 0)
             return (
@@ -275,13 +312,15 @@ def _evaluate_receipt_coverage(
         return False, err, None, head_sha
 
     covered_cids = {str(cid).lower() for cid in (receipt_data.get("covered_session_ids") or [])}
+    covered_ext = {str(cid).lower() for cid in (receipt_data.get("external_session_ids") or [])}
     missing_cids = all_committed_cids - covered_cids
-    if missing_cids:
+    missing_ext = ext_cids - covered_ext
+    if missing_cids or missing_ext:
         err = (
             f"[ANTIGRAVITY MERGE GUARD FAILED: INCOMPLETE SESSION PROVENANCE]\n"
-            f"PR #{pr_num} has commits with Antigravity Session IDs that are NOT included in the PR telemetry report!\n"
-            f"Missing Session IDs: {sorted(missing_cids)}\n"
-            f"Covered Session IDs in Report: {sorted(covered_cids)}\n"
+            f"PR #{pr_num} has commits with Session IDs that are NOT included in the PR telemetry report!\n"
+            f"Missing Session IDs: {sorted(missing_cids | missing_ext)}\n"
+            f"Covered Session IDs in Report: {sorted(covered_cids | covered_ext)}\n"
             f"Action Required: Re-run 'antigravity-guard post --pr {pr_num}' to aggregate all sessions."
         )
         return False, err, receipt_data, head_sha
@@ -302,7 +341,7 @@ def verify_pr_telemetry(
     timeout: int = DEFAULT_TIMEOUT_SEC,
     check_comments: bool = True,
 ) -> tuple[bool, str, dict[str, Any] | None, str | None]:
-    """Validates PR review resolution and 100% Antigravity session provenance coverage."""
+    """Validates PR review resolution and 100% Antigravity + external session provenance coverage."""
     cli = _cli_mod()
     try:
         commits, head_sha = cli.get_all_pr_commits_and_head(pr_num, repo, timeout=timeout)
@@ -318,17 +357,35 @@ def verify_pr_telemetry(
             return False, _format_unresolved_threads_error(pr_num, unresolved), None, head_sha
 
     committed_sessions, all_cids = _collect_pr_sessions(commits)
+    external_cids = {e["session_id"] for e in _collect_external_sessions(commits)}
     try:
         comments = cli.get_pr_comments(pr_num, repo, timeout=timeout)
     except Exception as exc:
         return False, f"Could not inspect PR comments: {exc}", None, head_sha
 
     receipt_data = _extract_receipt_from_comments(comments)
-    return _evaluate_receipt_coverage(pr_num, commits, all_cids, committed_sessions, receipt_data, head_sha)
+    return _evaluate_receipt_coverage(
+        pr_num, commits, all_cids, committed_sessions, receipt_data, head_sha, external_cids=external_cids
+    )
 
 
 def _aggregate_session_totals(covered_sessions: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregates billed tokens, prompt cache ratios, and estimated cost across session metrics."""
+    if not covered_sessions:
+        return {
+            "uncached": 0,
+            "cached": 0,
+            "thoughts": 0,
+            "candidates": 0,
+            "output": 0,
+            "gross": 0,
+            "billed": 0,
+            "turns": 0,
+            "cost": 0.0,
+            "savings_pct": 0.0,
+            "cache_pct": 0.0,
+            "model": "external",
+        }
     uncached = sum(int(s["uncached_prompt"]) for s in covered_sessions)
     cached = sum(int(s["cached_prompt"]) for s in covered_sessions)
     thoughts = sum(int(s["thoughts"]) for s in covered_sessions)
@@ -356,20 +413,40 @@ def _aggregate_session_totals(covered_sessions: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _build_external_attestation_section(external_sessions: list[dict[str, str]]) -> str:
+    """Renders markdown attestation table for non-Antigravity/external tool commits."""
+    if not external_sessions:
+        return ""
+    rows = "\n".join(
+        f"| `{e['sha']}` | {e['tool']} | `{e['session_id']}` |" for e in external_sessions
+    )
+    return (
+        "\n### External / Non-Antigravity Session Attestation\n\n"
+        "| Commit | Source Tool | External Session ID |\n"
+        "| :--- | :--- | :--- |\n"
+        f"{rows}\n"
+    )
+
+
 def _build_telemetry_markdown(
     pr_num: int,
     repo_slug: str,
     covered_sessions: list[dict[str, Any]],
     totals: dict[str, Any],
+    external_sessions: list[dict[str, str]] | None = None,
 ) -> str:
     """Renders deterministic markdown telemetry report and embedded JSON receipt without hardcoded data."""
+    ext_list = external_sessions or []
     covered_ids = sorted({str(s["cid"]).lower() for s in covered_sessions})
+    external_ids = sorted({e["session_id"] for e in ext_list})
     receipt_obj = {
         "version": "2.0",
         "pr": pr_num,
         "repo": repo_slug,
         "covered_session_ids": covered_ids,
+        "external_session_ids": external_ids,
         "direct_session_count": len(covered_sessions),
+        "external_session_count": len(ext_list),
         "total_billed_tokens": totals["billed"],
         "cache_hit_pct": round(float(totals["cache_pct"]), 1),
         "estimated_cost_usd": round(float(totals["cost"]), 2),
@@ -387,6 +464,7 @@ def _build_telemetry_markdown(
             f"{s['thoughts']:,} | {s['candidates']:,} | **{s['billed_tokens_75']:,}** |"
         )
     rows_text = "\n".join(session_rows)
+    ext_section = _build_external_attestation_section(ext_list)
     return (
         f"## Antigravity Session Token Caching & Billed Usage Report\n\n"
         f"Repository: `{repo_slug}` | PR: `#{pr_num}`\n\n"
@@ -398,7 +476,8 @@ def _build_telemetry_markdown(
         f"{rows_text}\n"
         f"| **Total** | `{totals['model']}` | **{totals['turns']}** | **{totals['uncached']:,}** | "
         f"**{totals['cached']:,}** | **{totals['cache_pct']:.1f}%** | **{totals['thoughts']:,}** | "
-        f"**{totals['candidates']:,}** | **{totals['billed']:,}** |\n\n"
+        f"**{totals['candidates']:,}** | **{totals['billed']:,}** |\n"
+        f"{ext_section}\n"
         f"### Expenditure Summary\n\n"
         f"| Metric | Value |\n| :--- | :---: |\n"
         f"| **Uncached Prompt Tokens** | {totals['uncached']:,} |\n"
@@ -434,6 +513,7 @@ def generate_and_post_telemetry(
     print(f"Aggregating Antigravity session telemetry for PR #{pr_num}...")
     commits = cli.get_pr_commits(pr_num, repo, timeout=timeout)
     _, direct_session_ids = _collect_pr_sessions(commits)
+    external_sessions = _collect_external_sessions(commits)
 
     covered_sessions: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -445,13 +525,13 @@ def generate_and_post_telemetry(
         else:
             missing.append(cid)
 
-    if not covered_sessions or missing:
+    if missing or (not covered_sessions and not external_sessions):
         sys.stderr.write(f"Error: Could not resolve telemetry DBs for PR #{pr_num} sessions: {sorted(missing)}\n")
         return False
 
     repo_slug = _resolve_repo_slug(repo, cwd, timeout)
     totals = _aggregate_session_totals(covered_sessions)
-    md = _build_telemetry_markdown(pr_num, repo_slug, covered_sessions, totals)
+    md = _build_telemetry_markdown(pr_num, repo_slug, covered_sessions, totals, external_sessions=external_sessions)
 
     comment_cmd = ["gh", "pr", "comment", str(pr_num), "--body", md]
     if repo:
