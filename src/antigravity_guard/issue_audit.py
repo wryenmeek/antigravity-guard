@@ -54,6 +54,9 @@ def _entry_invoked_subagent(entry: dict[str, Any], subagent_uuid: str) -> bool:
     tool_name = entry.get("tool") or entry.get("name")
     if tool_name == "invoke_subagent" and subagent_uuid in json.dumps(entry).lower():
         return "[ANTIGRAVITY ISSUE" not in str(entry.get("content", ""))
+    content_lower = str(entry.get("content", "")).lower()
+    if entry.get("type") == "GENERIC" and "created the following subagent:" in content_lower:
+        return subagent_uuid in content_lower
     return False
 
 

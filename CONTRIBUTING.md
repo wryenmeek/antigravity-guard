@@ -40,7 +40,7 @@ This document establishes the quality control standards, architectural contracts
 Configure local hooks and run the full quality gate before pushing:
 
 ```bash
-git config core.hooksPath .githooks
+git config core.hooksPath .githooks   # For Husky v9 repos, add UUIDv4 check in .husky/commit-msg instead
 uv sync --locked --dev
 uv run --locked ruff check .
 uv run --locked ruff format --check .

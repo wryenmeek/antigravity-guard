@@ -32,7 +32,7 @@ For local development with `uv`:
 ```bash
 git clone https://github.com/wryenmeek/antigravity-guard.git
 cd antigravity-guard
-git config core.hooksPath .githooks
+git config core.hooksPath .githooks   # Or integrate into .husky/commit-msg for Husky v9 repos
 uv sync --locked --dev
 uv run --locked antigravity-guard sync-plugin --clean-legacy
 ```
@@ -62,12 +62,47 @@ Both `@v2` and backwards-compatible `@v1` tags are maintained automatically:
 antigravity-guard post --pr <PR_NUMBER> [--repo owner/repo] [--timeout 60]
 antigravity-guard verify --pr <PR_NUMBER> [--post-status] [--ignore-unresolved-comments] [--verify-issue-audits] [--verify-skill-receipts] [--repo owner/repo]
 antigravity-guard verify-skills [--cwd PATH] [--staged-only] [--session-id UUID]
+antigravity-guard audit-skills [--cwd PATH] [--limit 30] [--check-promotion] [--json]
+antigravity-guard init-skills [--cwd PATH] [--force]
 antigravity-guard verify-issue [--cwd PATH] [--issue N] [--mode commit|strict] [--commit-msg MSG] [--transcript-path PATH]
+antigravity-guard lint-issue [--cwd PATH] (--issue N | --file PATH) [--repo owner/repo]
 antigravity-guard prune [--cwd /path/to/repo] [--quiet]
 antigravity-guard validate-plugin [--repo-root PATH] [--strict]
 antigravity-guard sync-plugin [--repo-root PATH] [--clean-legacy]
 antigravity-guard version
 ```
+
+---
+
+## Setting Up `.github/required-skills.json`
+
+Opt a repository into skill receipt verification and `audit-skills` governance by creating `.github/required-skills.json`:
+
+```bash
+antigravity-guard init-skills --cwd /path/to/repo
+```
+
+Schema:
+
+```json
+{
+  "rules": [
+    {
+      "pattern": "src/**/*.py",
+      "required_skills": ["ce-code-review", "ce-simplify-code"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "*.md",
+      "required_skills": ["ce-doc-review"],
+      "enforcement": "advisory"
+    }
+  ]
+}
+```
+
+- `enforcement: "gate"` blocks `git commit` / CI if any matched file lacks a fresh skill receipt.
+- `enforcement: "advisory"` records a mandatory review obligation without blocking commits; promote to `"gate"` once `antigravity-guard audit-skills --check-promotion` reports `PROMOTION_READY`.
 
 ---
 

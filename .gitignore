@@ -23,6 +23,7 @@ htmlcov/
 # Linters & Infigraph / Local CI
 .ruff_cache/
 .infigraph/
+.github/hooks/state/
 .claude/
 ci-failure-digest.json
 act_output.log

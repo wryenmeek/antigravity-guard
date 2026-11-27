@@ -184,6 +184,15 @@ def test_parent_transcript_ignores_error_denial_entries(tmp_path: Path) -> None:
     parent_log.write_text(json.dumps(error_entry) + "\n", encoding="utf-8")
     assert not issue_audit._parent_has_subagent_invocation(parent_log, SUBAGENT_UUID)
 
+    generic_entry = {
+        "step_index": 3,
+        "type": "GENERIC",
+        "status": "DONE",
+        "content": f'Created the following subagent:\n{{\n  "conversationId": "{SUBAGENT_UUID}"\n}}',
+    }
+    parent_log.write_text(json.dumps(generic_entry) + "\n", encoding="utf-8")
+    assert issue_audit._parent_has_subagent_invocation(parent_log, SUBAGENT_UUID)
+
 
 def test_git_merge_abort_exempted_from_merge_guard(
     git_worktree_env: GitWorktreeFixture,

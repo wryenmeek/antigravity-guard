@@ -27,6 +27,7 @@ from antigravity_guard.hooks import (
 from antigravity_guard.issue_audit import handle_stop_hook, verify_issue_audits
 from antigravity_guard.issue_lint import lint_issue
 from antigravity_guard.plugin_sync import sync_plugin_local, validate_plugin_bundle
+from antigravity_guard.skill_audit import audit_skills, format_audit_report, init_required_skills
 from antigravity_guard.skill_receipts import verify_skills
 from antigravity_guard.telemetry import (
     DEFAULT_TIMEOUT_SEC,
@@ -44,6 +45,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_SEC",
     "RECEIPT_END",
     "RECEIPT_START",
+    "audit_skills",
     "calc_usd_cost",
     "extract_session_ids_from_text",
     "generate_and_post_telemetry",
@@ -57,6 +59,7 @@ __all__ = [
     "handle_pre_tool_hook",
     "handle_stop_hook",
     "handle_stop_hook_cli",
+    "init_required_skills",
     "is_direct_push_to_main",
     "lint_issue",
     "main",
@@ -121,6 +124,20 @@ def _add_gate_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     p_lint.add_argument("--issue", type=int, default=None, help="GitHub issue number")
     p_lint.add_argument("--file", type=Path, default=None, help="Local issue markdown file")
     p_lint.add_argument("--repo", type=str, default=None, help="Optional owner/repo")
+
+    p_audit = subparsers.add_parser(
+        "audit-skills", help="Audit skill adoption and promotion readiness over git history"
+    )
+    p_audit.add_argument(
+        "--cwd", "--repo-root", dest="cwd", type=Path, default=None, help="Target repository directory"
+    )
+    p_audit.add_argument("--limit", type=int, default=30, help="Number of recent commits to inspect")
+    p_audit.add_argument("--check-promotion", action="store_true", help="Fail if any active gate degraded")
+    p_audit.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON output")
+
+    p_init = subparsers.add_parser("init-skills", help="Create starter .github/required-skills.json configuration")
+    p_init.add_argument("--cwd", type=Path, default=None, help="Target repository directory")
+    p_init.add_argument("--force", action="store_true", help="Overwrite existing .github/required-skills.json")
 
 
 def _add_maintenance_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -226,6 +243,28 @@ def _run_lint_issue(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _run_audit_skills(args: argparse.Namespace) -> int:
+    import json
+
+    ok, report = audit_skills(args.cwd, limit=args.limit, check_promotion=args.check_promotion)
+    if args.as_json:
+        print(json.dumps(report, indent=2))
+    elif not report.get("opted_in", True):
+        print("Repository is not opted in (no .github/required-skills.json).")
+    elif report.get("errors"):
+        for err in report["errors"]:
+            sys.stderr.write(f"ERROR: {err}\n")
+    else:
+        print(format_audit_report(report))
+    return 0 if ok else 1
+
+
+def _run_init_skills(args: argparse.Namespace) -> int:
+    ok, msg = init_required_skills(args.cwd, force=args.force)
+    (sys.stdout if ok else sys.stderr).write(msg + "\n")
+    return 0 if ok else 1
+
+
 def _run_validate_plugin(args: argparse.Namespace) -> int:
     ok, errors = validate_plugin_bundle(repo_root=args.repo_root, strict=args.strict)
     if ok:
@@ -253,6 +292,8 @@ def main() -> None:
         "verify-skills": lambda: _run_verify_skills(args),
         "verify-issue": lambda: _run_verify_issue(args),
         "lint-issue": lambda: _run_lint_issue(args),
+        "audit-skills": lambda: _run_audit_skills(args),
+        "init-skills": lambda: _run_init_skills(args),
         "hook-pre-tool": lambda: (handle_pre_tool_hook(), 0)[1],
         "hook-post-tool": lambda: (handle_post_tool_hook(), 0)[1],
         "hook-stop": lambda: (handle_stop_hook_cli(), 0)[1],
