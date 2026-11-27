@@ -312,6 +312,8 @@ def _match_single_pattern(rel_path: str, pattern: str) -> bool:
     """Matches a single expanded glob pattern against a repository-relative POSIX path."""
     if PurePosixPath(rel_path).match(pattern) or fnmatch(rel_path, pattern):
         return True
+    if "**/" in pattern and _match_single_pattern(rel_path, pattern.replace("**/", "", 1)):
+        return True
     if "/" not in pattern:
         return fnmatch(PurePosixPath(rel_path).name, pattern)
     return False
@@ -366,6 +368,76 @@ def _required_skill_mtimes(
     return required
 
 
+def _has_balanced_braces(pattern: str) -> bool:
+    """Checks that `{...}` brace groups in a glob pattern are balanced and non-empty."""
+    depth = 0
+    for ch in pattern:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0 and "{}" not in pattern
+
+
+def _validate_single_rule(idx: int, rule: Any) -> list[str]:
+    """Validates one `.github/required-skills.json` rule entry."""
+    if not isinstance(rule, dict):
+        return [f"Rule #{idx} must be a JSON object."]
+    errors: list[str] = []
+    pattern = str(rule.get("pattern") or "").strip()
+    if not pattern:
+        errors.append(f"Rule #{idx} is missing a non-empty `pattern`.")
+    elif not _has_balanced_braces(pattern):
+        errors.append(f"Rule #{idx} has malformed or empty brace expansion in pattern {pattern!r}.")
+    skills = rule.get("required_skills")
+    if not isinstance(skills, list) or not [s for s in skills if str(s).strip()]:
+        errors.append(f"Rule #{idx} ({pattern or 'unknown'}) must define a non-empty `required_skills` list.")
+    enforcement = str(rule.get("enforcement", "gate")).lower()
+    if enforcement not in {"gate", "advisory"}:
+        errors.append(
+            f"Rule #{idx} ({pattern or 'unknown'}) has invalid enforcement {enforcement!r} (expected 'gate' or 'advisory')."
+        )
+    return errors
+
+
+def validate_required_skills_config(repo_root: Path) -> list[str]:
+    """Validates `.github/required-skills.json` schema and pathspec syntax."""
+    config_file = repo_root / ".github" / "required-skills.json"
+    if not config_file.is_file():
+        return []
+    try:
+        cfg = json.loads(config_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"Malformed .github/required-skills.json: {exc}"]
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("rules"), list):
+        return [".github/required-skills.json must be a JSON object with a `rules` array."]
+    errors: list[str] = []
+    for idx, rule in enumerate(cfg["rules"], start=1):
+        errors.extend(_validate_single_rule(idx, rule))
+    return errors
+
+
+def _collect_missing_or_stale_skills(
+    required: dict[str, float],
+    receipts: list[dict[str, Any]],
+) -> list[str]:
+    """Compares required skill timestamps against recorded receipts."""
+    missing_or_stale: list[str] = []
+    for skill_name, newest_mtime in sorted(required.items()):
+        norm_required = _normalize_skill_name(skill_name)
+        matching = [
+            float(r.get("epoch", 0.0))
+            for r in receipts
+            if _normalize_skill_name(str(r.get("skill") or "")) == norm_required
+        ]
+        if not matching or max(matching) < newest_mtime:
+            state = "stale receipt" if matching else "missing receipt"
+            missing_or_stale.append(f"{skill_name} ({state})")
+    return missing_or_stale
+
+
 def verify_skills(
     cwd: str | Path | None = None,
     *,
@@ -377,6 +449,10 @@ def verify_skills(
     config_file = repo_root / ".github" / "required-skills.json"
     if not config_file.is_file():
         return True, f"Repository {repo_root.name} is not opted in (no .github/required-skills.json)."
+
+    config_errors = validate_required_skills_config(repo_root)
+    if config_errors:
+        return False, "Invalid .github/required-skills.json:\n" + "\n".join(f"  - {e}" for e in config_errors)
 
     cfg = json.loads(config_file.read_text(encoding="utf-8"))
     rules = cfg.get("rules", []) if isinstance(cfg, dict) else []
@@ -391,18 +467,7 @@ def verify_skills(
         return True, "No staged files require skill execution receipts."
 
     receipts = load_skill_receipts(repo_root, session_id=session_id)
-    missing_or_stale: list[str] = []
-    for skill_name, newest_mtime in sorted(required.items()):
-        norm_required = _normalize_skill_name(skill_name)
-        matching = [
-            float(r.get("epoch", 0.0))
-            for r in receipts
-            if _normalize_skill_name(str(r.get("skill") or "")) == norm_required
-        ]
-        if not matching or max(matching) < newest_mtime:
-            state = "stale receipt" if matching else "missing receipt"
-            missing_or_stale.append(f"{skill_name} ({state})")
-
+    missing_or_stale = _collect_missing_or_stale_skills(required, receipts)
     if missing_or_stale:
         return (
             False,

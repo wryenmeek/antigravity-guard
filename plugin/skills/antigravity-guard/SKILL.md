@@ -22,6 +22,7 @@ antigravity-guard verify --pr <PR_NUMBER> [--post-status] [--ignore-unresolved-c
 ### 3. Verify Local Skill Receipts, Issue Completion Ledgers & Triage Readiness
 ```bash
 antigravity-guard verify-skills [--cwd PATH] [--staged-only] [--session-id UUID]
+antigravity-guard audit-skills [--cwd PATH] [--limit 30] [--check-promotion] [--json]
 antigravity-guard verify-issue [--cwd PATH] [--issue N] [--mode commit|strict] [--commit-msg MSG] [--transcript-path PATH] [--no-verify-transcripts]
 antigravity-guard lint-issue [--cwd PATH] (--issue N | --file PATH) [--repo owner/repo]
 ```
@@ -38,5 +39,10 @@ antigravity-guard prune [--cwd <PATH>] [--quiet]
 antigravity-guard validate-plugin [--repo-root PATH] [--strict]
 antigravity-guard sync-plugin [--repo-root PATH] [--clean-legacy]
 ```
+
+### 5. Skill Governance, Promotion & Glob Sizing Rubric
+- **Advisory → Gate Promotion (`audit-skills --check-promotion`):** Promote an `advisory` rule to `gate` only after $\ge 80\%$ adoption across $\ge 3$ commits/PRs, `0` manual overrides, clean CI runs, and tight globs.
+- **Glob Sizing:** Balance *co-change coupling* (avoid missing related files) against *relevance dilution* (avoid unbounded `**/*` wildcards that cause context thrashing). Prefer scoped brace globs like `src/**/*.{js,ts}`.
+- **Husky v9 Integration:** In Node/TS repos using Husky v9 (`npm install` resets `core.hooksPath` to `.husky/`), enforce `Antigravity-Session-ID:` UUIDv4 trailers inside `.husky/commit-msg` rather than `git config core.hooksPath .githooks`.
 
 *(Backwards-compatible alias `antigravity-telemetry` supports all commands and flags.)*

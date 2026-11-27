@@ -8,7 +8,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from antigravity_guard.skill_receipts import _clean_env, _pattern_matches, _resolve_repo_root
+from antigravity_guard.skill_receipts import (
+    _clean_env,
+    _pattern_matches,
+    _resolve_repo_root,
+    validate_required_skills_config,
+)
 
 _PATH_TOKEN_RE = re.compile(
     r"(?:^|[\s`\"'(])([a-zA-Z0-9_.\-]+(?:/[a-zA-Z0-9_.\-*{}]+)+(?:\.[a-zA-Z0-9]+)?|[a-zA-Z0-9_.\-]+\.[a-zA-Z0-9]{1,6})(?=$|[\s`\"'),:;])"
@@ -98,7 +103,7 @@ def lint_issue_body(body: str, repo_root: Path) -> tuple[bool, str]:
     if not has_skills_cfg and not has_infigraph:
         return True, f"Repository {repo_root.name} is not opted in to Pre-ready-for-agent governance."
 
-    errors: list[str] = []
+    errors: list[str] = list(validate_required_skills_config(repo_root))
     if not _BLAST_RADIUS_RE.search(body):
         errors.append("Missing blast-radius / `infigraph` verification section or note.")
 
