@@ -6,13 +6,33 @@
       "enforcement": "gate"
     },
     {
-      "pattern": "*.md",
-      "required_skills": ["ce-doc-review"],
+      "pattern": "src/**/*.py",
+      "required_skills": ["tdd", "antigravity-guard"],
       "enforcement": "advisory"
     },
     {
-      "pattern": "plugin/skills/**/SKILL.md",
-      "required_skills": ["agy-customizations", "plugin"],
+      "pattern": "tests/**/*.py",
+      "required_skills": ["ce-code-review", "tdd"],
+      "enforcement": "advisory"
+    },
+    {
+      "pattern": "*.md",
+      "required_skills": ["ce-doc-review", "writing-for-agents"],
+      "enforcement": "advisory"
+    },
+    {
+      "pattern": "plugin/{plugin.json,hooks.json,rules/**,skills/**/SKILL.md}",
+      "required_skills": ["agy-customizations", "plugin", "write-a-skill"],
+      "enforcement": "advisory"
+    },
+    {
+      "pattern": ".github/workflows/*.{yml,yaml}",
+      "required_skills": ["local-action-verification"],
+      "enforcement": "advisory"
+    },
+    {
+      "pattern": "action.yml",
+      "required_skills": ["local-action-verification"],
       "enforcement": "advisory"
     }
   ]
