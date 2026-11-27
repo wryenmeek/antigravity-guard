@@ -56,6 +56,18 @@ def _run_git(repo_dir: str, *args: str, timeout: int = 10) -> subprocess.Complet
         return None
 
 
+def resolve_worktree_root(raw_cwd: object) -> str | None:
+    """Resolves the active checkout/worktree root (`--show-toplevel`) from a hook `cwd`."""
+    trusted_cwd = resolve_trusted_cwd(raw_cwd)
+    if trusted_cwd is None:
+        return None
+    res = _run_git(trusted_cwd, "rev-parse", "--show-toplevel", timeout=5)
+    if res and res.returncode == 0 and res.stdout.strip():
+        top = res.stdout.strip()
+        return os.path.realpath(top) if os.path.exists(top) else os.path.abspath(top)
+    return trusted_cwd
+
+
 def resolve_git_context(raw_cwd: object) -> tuple[str | None, bool, str]:
     """Resolves `(repo_root, is_worktree, current_branch)` from a hook `cwd` safely."""
     trusted_cwd = resolve_trusted_cwd(raw_cwd)
@@ -189,6 +201,28 @@ def _cleanup_empty_worktrees_dir(repo_root: str) -> None:
             os.rmdir(worktrees_dir)
 
 
+def _prune_completed_untracked_ledgers(repo_root: str) -> list[str]:
+    """Removes untracked/gitignored VERIFIED_COMPLETE issue audit ledgers after merge."""
+    import json
+    from pathlib import Path
+
+    reviews_dir = Path(repo_root) / ".infigraph" / "reviews"
+    if not reviews_dir.is_dir():
+        return []
+    pruned: list[str] = []
+    for ledger in sorted(reviews_dir.glob("issue_*_audit.json")):
+        rel = str(ledger.relative_to(repo_root))
+        tracked = _run_git(repo_root, "ls-files", "--error-unmatch", rel, timeout=5)
+        if tracked and tracked.returncode == 0:
+            continue
+        with contextlib.suppress(OSError, json.JSONDecodeError):
+            data = json.loads(ledger.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and str(data.get("audit_phase") or "").upper() == "VERIFIED_COMPLETE":
+                ledger.unlink()
+                pruned.append(rel)
+    return pruned
+
+
 def prune_merged_branches_and_worktrees(cwd: str | None = None, quiet: bool = False) -> dict[str, Any]:
     """Prunes branches merged into default branch or gone upstream, plus linked worktrees."""
     repo_root = _resolve_common_repo_root(_sanitize_cli_dir(cwd))
@@ -211,7 +245,12 @@ def prune_merged_branches_and_worktrees(cwd: str | None = None, quiet: bool = Fa
 
     _run_git(repo_root, "worktree", "prune")
     _cleanup_empty_worktrees_dir(repo_root)
+    pruned_ledgers = _prune_completed_untracked_ledgers(repo_root)
 
     if not quiet:
         _print_prune_summary(pruned_branches, pruned_worktrees)
-    return {"pruned_branches": pruned_branches, "pruned_worktrees": pruned_worktrees}
+    return {
+        "pruned_branches": pruned_branches,
+        "pruned_worktrees": pruned_worktrees,
+        "pruned_ledgers": pruned_ledgers,
+    }
