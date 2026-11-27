@@ -448,6 +448,109 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertEqual(unresolved[0]["url"], "url2")
         self.assertEqual(unresolved[0]["body"], "open feedback")
 
+    def test_extract_external_sessions_from_text(self):
+        from antigravity_guard.telemetry import extract_external_sessions_from_text
+
+        text = (
+            "feat: remote work\n\n"
+            "Claude-Session-ID: 0ba7b819-f031-4b58-affb-e5bae59ff052\n"
+            "External-Session-ID: codex-run-99 (Codex CLI)\n"
+        )
+        self.assertEqual(
+            extract_external_sessions_from_text(text),
+            [
+                ("0ba7b819-f031-4b58-affb-e5bae59ff052", "Claude Code"),
+                ("codex-run-99", "Codex CLI"),
+            ],
+        )
+
+    @patch("subprocess.run")
+    @patch.object(vpr, "get_session_telemetry")
+    @patch.object(vpr, "get_pr_commits")
+    def test_mixed_tool_pr_post_includes_external_attestation_and_receipt(self, mock_commits, mock_tel, mock_run):
+        mock_commits.return_value = [
+            {
+                "oid": "11111111aaaa",
+                "messageHeadline": "feat: claude commit",
+                "messageBody": "Claude-Session-ID: 0ba7b819-f031-4b58-affb-e5bae59ff052",
+            },
+            {
+                "oid": "22222222bbbb",
+                "messageHeadline": "fix: agy commit",
+                "messageBody": "Antigravity-Session-ID: ba867a4e-c1f2-4da1-88ee-4c94390d25f4",
+            },
+        ]
+        mock_tel.return_value = {
+            "cid": "ba867a4e-c1f2-4da1-88ee-4c94390d25f4",
+            "turns": 2,
+            "model": "gemini-3.8-flash-tiered",
+            "uncached_prompt": 500,
+            "cached_prompt": 4500,
+            "thoughts": 50,
+            "candidates": 150,
+            "output_total": 200,
+            "gross_context": 5200,
+            "billed_tokens_75": 1825,
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/org/repo/pull/32#comment-1", stderr=""
+        )
+
+        ok = vpr.generate_and_post_telemetry(32, repo="org/repo")
+        self.assertTrue(ok)
+        comment_cmd = mock_run.call_args[0][0]
+        body = comment_cmd[comment_cmd.index("--body") + 1]
+        self.assertIn("External / Non-Antigravity Session Attestation", body)
+        self.assertIn("Claude Code", body)
+        self.assertIn("0ba7b819-f031-4b58-affb-e5bae59ff052", body)
+        self.assertIn('"external_session_ids"', body)
+
+    @patch.object(vpr, "get_unresolved_review_threads", return_value=[])
+    @patch.object(vpr, "get_all_pr_commits_and_head")
+    @patch.object(vpr, "get_pr_comments")
+    def test_mixed_tool_pr_verify_requires_external_session_coverage(self, mock_comments, mock_commits, _mock_threads):
+        mock_commits.return_value = (
+            [
+                {
+                    "oid": "11111111aaaa",
+                    "messageHeadline": "feat: claude commit",
+                    "messageBody": "Claude-Session-ID: 0ba7b819-f031-4b58-affb-e5bae59ff052",
+                },
+                {
+                    "oid": "22222222bbbb",
+                    "messageHeadline": "fix: agy commit",
+                    "messageBody": "Antigravity-Session-ID: ba867a4e-c1f2-4da1-88ee-4c94390d25f4",
+                },
+            ],
+            "headsha123",
+        )
+        incomplete_receipt = {
+            "covered_session_ids": ["ba867a4e-c1f2-4da1-88ee-4c94390d25f4"],
+            "total_billed_tokens": 1825,
+            "cache_hit_pct": 90.0,
+        }
+        mock_comments.return_value = [
+            {
+                "body": f"{vpr.RECEIPT_START}\n{json.dumps(incomplete_receipt)}\n{vpr.RECEIPT_END}",
+                "authorAssociation": "OWNER",
+            }
+        ]
+        passed_bad, msg_bad, _, _ = vpr.verify_pr_telemetry(32)
+        self.assertFalse(passed_bad)
+        self.assertIn("INCOMPLETE SESSION PROVENANCE", msg_bad)
+        self.assertIn("0ba7b819-f031-4b58-affb-e5bae59ff052", msg_bad)
+
+        complete_receipt = dict(incomplete_receipt, external_session_ids=["0ba7b819-f031-4b58-affb-e5bae59ff052"])
+        mock_comments.return_value = [
+            {
+                "body": f"{vpr.RECEIPT_START}\n{json.dumps(complete_receipt)}\n{vpr.RECEIPT_END}",
+                "authorAssociation": "OWNER",
+            }
+        ]
+        passed_ok, msg_ok, _, _ = vpr.verify_pr_telemetry(32)
+        self.assertTrue(passed_ok)
+        self.assertIn("ANTIGRAVITY MERGE GUARD PASSED", msg_ok)
+
 
 if __name__ == "__main__":
     unittest.main()
