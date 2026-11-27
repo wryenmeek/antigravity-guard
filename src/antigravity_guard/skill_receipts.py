@@ -290,8 +290,26 @@ def _git_files(repo_root: Path, staged_only: bool) -> list[str]:
     return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
 
-def _pattern_matches(rel_path: str, pattern: str) -> bool:
-    """Matches repository relative paths against glob rules (`*.py`, `scripts/**/*.py`, etc.)."""
+def _normalize_skill_name(name: str) -> str:
+    """Normalizes skill identifiers so kebab-case and snake_case match equivalently."""
+    return name.strip().replace("-", "_").lower()
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """Expands bash-style `{a,b}` brace alternatives in a glob pattern."""
+    match = re.search(r"\{([^{}]+)\}", pattern)
+    if not match:
+        return [pattern]
+    prefix = pattern[: match.start()]
+    suffix = pattern[match.end() :]
+    expanded: list[str] = []
+    for alt in match.group(1).split(","):
+        expanded.extend(_expand_braces(f"{prefix}{alt.strip()}{suffix}"))
+    return expanded
+
+
+def _match_single_pattern(rel_path: str, pattern: str) -> bool:
+    """Matches a single expanded glob pattern against a repository-relative POSIX path."""
     if PurePosixPath(rel_path).match(pattern) or fnmatch(rel_path, pattern):
         return True
     if "/" not in pattern:
@@ -299,15 +317,42 @@ def _pattern_matches(rel_path: str, pattern: str) -> bool:
     return False
 
 
-def _required_skill_mtimes(repo_root: Path, files: list[str], rules: list[dict[str, Any]]) -> dict[str, float]:
-    """Maps each required non-advisory skill name to the newest mtime of matching changed files."""
+def _pattern_matches(rel_path: str, pattern: str) -> bool:
+    """Matches repository relative paths against glob rules (`*.py`, `src/**/*.{js,ts}`, etc.)."""
+    return any(_match_single_pattern(rel_path, expanded) for expanded in _expand_braces(pattern))
+
+
+def _file_timestamp(repo_root: Path, rel_path: str, *, staged_only: bool) -> float:
+    """Returns filesystem mtime for staged checks, or git commit timestamp for non-staged/CI checks."""
+    if not staged_only:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "log", "-1", "--format=%ct", "--", rel_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_clean_env(),
+        )
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return float(res.stdout.strip())
+    return (repo_root / rel_path).stat().st_mtime
+
+
+def _required_skill_mtimes(
+    repo_root: Path,
+    files: list[str],
+    rules: list[dict[str, Any]],
+    *,
+    staged_only: bool = True,
+) -> dict[str, float]:
+    """Maps each required non-advisory skill name to the newest timestamp of matching changed files."""
     required: dict[str, float] = {}
     for rule in rules:
         if str(rule.get("enforcement", "gate")).lower() == "advisory":
             continue
         pattern = str(rule.get("pattern") or "")
         matched_mtimes = [
-            (repo_root / f).stat().st_mtime
+            _file_timestamp(repo_root, f, staged_only=staged_only)
             for f in files
             if pattern and _pattern_matches(f, pattern) and (repo_root / f).is_file()
         ]
@@ -336,14 +381,24 @@ def verify_skills(
     cfg = json.loads(config_file.read_text(encoding="utf-8"))
     rules = cfg.get("rules", []) if isinstance(cfg, dict) else []
     files = _git_files(repo_root, staged_only=staged_only)
-    required = _required_skill_mtimes(repo_root, files, rules if isinstance(rules, list) else [])
+    required = _required_skill_mtimes(
+        repo_root,
+        files,
+        rules if isinstance(rules, list) else [],
+        staged_only=staged_only,
+    )
     if not required:
         return True, "No staged files require skill execution receipts."
 
     receipts = load_skill_receipts(repo_root, session_id=session_id)
     missing_or_stale: list[str] = []
     for skill_name, newest_mtime in sorted(required.items()):
-        matching = [float(r.get("epoch", 0.0)) for r in receipts if r.get("skill") == skill_name]
+        norm_required = _normalize_skill_name(skill_name)
+        matching = [
+            float(r.get("epoch", 0.0))
+            for r in receipts
+            if _normalize_skill_name(str(r.get("skill") or "")) == norm_required
+        ]
         if not matching or max(matching) < newest_mtime:
             state = "stale receipt" if matching else "missing receipt"
             missing_or_stale.append(f"{skill_name} ({state})")
