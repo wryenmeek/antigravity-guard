@@ -103,6 +103,14 @@ def audit_skills(
     check_promotion: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
     """Audits `.github/required-skills.json` adoption across recent git commits."""
+    if limit < 1:
+        return False, {
+            "opted_in": True,
+            "limit": limit,
+            "commits_analyzed": 0,
+            "rules": [],
+            "errors": ["--limit must be >= 1."],
+        }
     repo_root = _resolve_repo_root(cwd)
     config_file = repo_root / ".github" / "required-skills.json"
     if not config_file.is_file():
@@ -127,3 +135,22 @@ def audit_skills(
         "rules": results,
         "errors": [],
     }
+
+
+_DEFAULT_REQUIRED_SKILLS: dict[str, Any] = {
+    "rules": [
+        {"pattern": "src/**/*.py", "required_skills": ["ce-code-review", "ce-simplify-code"], "enforcement": "gate"},
+        {"pattern": "*.md", "required_skills": ["ce-doc-review"], "enforcement": "advisory"},
+    ]
+}
+
+
+def init_required_skills(cwd: str | Path | None = None, *, force: bool = False) -> tuple[bool, str]:
+    """Creates a starter `.github/required-skills.json` configuration in `cwd`."""
+    repo_root = _resolve_repo_root(cwd)
+    target = repo_root / ".github" / "required-skills.json"
+    if target.exists() and not force:
+        return False, f"{target} already exists (pass --force to overwrite)."
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(_DEFAULT_REQUIRED_SKILLS, indent=2) + "\n", encoding="utf-8")
+    return True, f"Created {target}."

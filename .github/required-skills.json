@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "pattern": "src/**/*.py",
+      "required_skills": ["ce-code-review", "ce-simplify-code"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "*.md",
+      "required_skills": ["ce-doc-review"],
+      "enforcement": "advisory"
+    },
+    {
+      "pattern": "plugin/skills/**/SKILL.md",
+      "required_skills": ["agy-customizations", "plugin"],
+      "enforcement": "advisory"
+    }
+  ]
+}

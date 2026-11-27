@@ -144,3 +144,17 @@ def test_audit_skills_computes_adoption_and_promotion(git_worktree_env: GitWorkt
     assert (
         cli._run_audit_skills(argparse.Namespace(cwd=repo.parent, limit=10, check_promotion=False, as_json=False)) == 0
     )
+
+
+def test_init_skills_creates_and_protects_config(tmp_path: Path) -> None:
+    """init-skills creates starter .github/required-skills.json and refuses overwrite without --force."""
+    import argparse
+
+    from antigravity_guard import cli
+
+    assert cli._run_init_skills(argparse.Namespace(cwd=tmp_path, force=False)) == 0
+    cfg = tmp_path / ".github" / "required-skills.json"
+    assert cfg.is_file()
+    assert skill_receipts.validate_required_skills_config(tmp_path) == []
+    assert cli._run_init_skills(argparse.Namespace(cwd=tmp_path, force=False)) == 1
+    assert cli._run_init_skills(argparse.Namespace(cwd=tmp_path, force=True)) == 0
